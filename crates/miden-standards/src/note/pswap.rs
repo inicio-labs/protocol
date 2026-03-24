@@ -366,10 +366,7 @@ impl PswapNote {
             return Err(NoteError::other("Swap note must have exactly 1 offered asset"));
         }
         let total_offered_amount = self.offered_asset_amount()?;
-        let offered_faucet_id = match self.assets.iter().next().unwrap() {
-            Asset::Fungible(fa) => fa.faucet_id(),
-            _ => unreachable!(),
-        };
+        let offered_faucet_id = self.offered_faucet_id()?;
 
         // Validate fill amount
         if fill_amount == 0 {
@@ -445,6 +442,18 @@ impl PswapNote {
             .ok_or(NoteError::other("No offered asset found"))?;
         match asset {
             Asset::Fungible(fa) => Ok(fa.amount()),
+            _ => Err(NoteError::other("Non-fungible offered asset not supported")),
+        }
+    }
+
+    pub fn offered_faucet_id(&self) -> Result<AccountId, NoteError> {
+        let asset = self
+            .assets
+            .iter()
+            .next()
+            .ok_or(NoteError::other("No offered asset found"))?;
+        match asset {
+            Asset::Fungible(fa) => Ok(fa.faucet_id()),
             _ => Err(NoteError::other("Non-fungible offered asset not supported")),
         }
     }
