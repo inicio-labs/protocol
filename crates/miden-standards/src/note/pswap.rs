@@ -5,8 +5,16 @@ use miden_protocol::assembly::Path;
 use miden_protocol::asset::{Asset, FungibleAsset};
 use miden_protocol::errors::NoteError;
 use miden_protocol::note::{
-    Note, NoteAssets, NoteAttachment, NoteAttachmentScheme, NoteMetadata, NoteRecipient,
-    NoteScript, NoteStorage, NoteTag, NoteType,
+    Note,
+    NoteAssets,
+    NoteAttachment,
+    NoteAttachmentScheme,
+    NoteMetadata,
+    NoteRecipient,
+    NoteScript,
+    NoteStorage,
+    NoteTag,
+    NoteType,
 };
 use miden_protocol::utils::sync::LazyLock;
 use miden_protocol::{Felt, Hasher, ONE, Word, ZERO};
@@ -483,11 +491,11 @@ impl PswapNote {
     /// calculation. Returns the full `offered_total` when `input_amount == requested_total`.
     ///
     /// The formula is implemented in two branches to maximize precision:
-    /// - When `offered > requested`: the ratio `offered/requested` is >= 1, so we compute
-    ///   `(offered * FACTOR / requested) * input / FACTOR` to avoid losing the fractional part.
+    /// - When `offered > requested`: the ratio `offered/requested` is >= 1, so we compute `(offered
+    ///   * FACTOR / requested) * input / FACTOR` to avoid losing the fractional part.
     /// - When `requested >= offered`: the ratio `offered/requested` is < 1, so computing it
-    ///   directly would truncate to zero. Instead we compute the inverse ratio
-    ///   `(requested * FACTOR / offered)` and divide: `(input * FACTOR) / inverse_ratio`.
+    ///   directly would truncate to zero. Instead we compute the inverse ratio `(requested * FACTOR
+    ///   / offered)` and divide: `(input * FACTOR) / inverse_ratio`.
     fn calculate_output_amount(offered_total: u64, requested_total: u64, input_amount: u64) -> u64 {
         const PRECISION_FACTOR: u64 = 100_000;
 
