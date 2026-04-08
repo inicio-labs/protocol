@@ -179,14 +179,22 @@ end
 #! Inputs:  [offered, requested, input]
 #! Outputs: [offered_out]
 #!
-#! Invocation: exec
+@locals(1)
+# loc.0 = input amount
 proc calculate_tokens_offered_for_requested
-    movup.2 mem_store.CALC_AMT_IN
+    # u64 convention: lo is on TOP after u32split
+    # u32split(a)          => [lo (top), hi]
+    # u64::wrapping_mul:   [b_lo, b_hi, a_lo, a_hi] => [c_lo, c_hi]   c = a*b
+    # u64::div:            [b_lo, b_hi, a_lo, a_hi] => [q_lo, q_hi]   q = a/b
+    # combine [lo, hi] => single Felt: swap push.MAX_U32 mul add
+
+    movup.2 loc_store.0
     # => [offered, requested]
 
-    # Full fill shortcut: if input == requested, return offered directly
-    dup.1 mem_load.CALC_AMT_IN eq
-    # => [is_full_fill, offered, requested]
+    # Early return: if input == requested (full fill), return offered directly.
+    # This avoids precision loss from integer division with the FACTOR.
+    dup.1 loc_load.0 eq
+    # => [requested == input, offered, requested]
 
     if.true
         swap drop
@@ -211,7 +219,7 @@ proc calculate_tokens_offered_for_requested
             exec.u64::div
             # => [ratio_lo, ratio_hi]
 
-            mem_load.CALC_AMT_IN u32split push.FACTOR u32split
+            loc_load.0 u32split push.FACTOR u32split
             # => [F_lo, F_hi, in_lo, in_hi, ratio_lo, ratio_hi]
 
             exec.u64::wrapping_mul
@@ -240,7 +248,7 @@ proc calculate_tokens_offered_for_requested
             exec.u64::div
             # => [ratio_lo, ratio_hi]
 
-            mem_load.CALC_AMT_IN u32split
+            loc_load.0 u32split
             # => [in_lo, in_hi, ratio_lo, ratio_hi]
 
             exec.u64::wrapping_mul
@@ -638,9 +646,10 @@ pub proc main
     # => []
 
     exec.is_consumer_creator
-    # => [is_creator]
+    # => [is_creator, acct_fill_amount, inflight_amount]
 
     if.true
+        drop drop
         exec.handle_reclaim
     else
         exec.execute_pswap
