@@ -470,14 +470,13 @@ async fn user_code_can_abort_transaction_with_summary() -> anyhow::Result<()> {
 
     // Consume and create a note so the input and outputs notes commitment is not the empty word.
     let mut rng = RandomCoin::new(Word::empty());
-    let output_note = P2idNote::create(
-        account.id(),
-        account.id(),
-        vec![],
-        NoteType::Private,
-        NoteAttachments::default(),
-        &mut rng,
-    )?;
+    let output_note: Note = P2idNote::builder()
+        .sender(account.id())
+        .target(account.id())
+        .note_type(NoteType::Private)
+        .generate_serial_number(&mut rng)
+        .build()?
+        .into();
     let input_note = create_spawn_note(vec![&output_note])?;
 
     let mut builder = MockChain::builder();
@@ -515,14 +514,13 @@ async fn tx_summary_commitment_is_signed_by_falcon_auth() -> anyhow::Result<()> 
         auth_scheme: AuthScheme::Falcon512Poseidon2,
     })?;
     let mut rng = RandomCoin::new(Word::empty());
-    let p2id_note = P2idNote::create(
-        account.id(),
-        account.id(),
-        vec![],
-        NoteType::Private,
-        NoteAttachments::default(),
-        &mut rng,
-    )?;
+    let p2id_note: Note = P2idNote::builder()
+        .sender(account.id())
+        .target(account.id())
+        .note_type(NoteType::Private)
+        .generate_serial_number(&mut rng)
+        .build()?
+        .into();
     let spawn_note = builder.add_spawn_note([&p2id_note])?;
     let chain = builder.build()?;
 
@@ -577,14 +575,13 @@ async fn tx_summary_commitment_is_signed_by_ecdsa_auth() -> anyhow::Result<()> {
     let account = builder
         .add_existing_mock_account(Auth::BasicAuth { auth_scheme: AuthScheme::EcdsaK256Keccak })?;
     let mut rng = RandomCoin::new(Word::empty());
-    let p2id_note = P2idNote::create(
-        account.id(),
-        account.id(),
-        vec![],
-        NoteType::Private,
-        NoteAttachments::default(),
-        &mut rng,
-    )?;
+    let p2id_note: Note = P2idNote::builder()
+        .sender(account.id())
+        .target(account.id())
+        .note_type(NoteType::Private)
+        .generate_serial_number(&mut rng)
+        .build()?
+        .into();
     let spawn_note = builder.add_spawn_note([&p2id_note])?;
     let chain = builder.build()?;
 

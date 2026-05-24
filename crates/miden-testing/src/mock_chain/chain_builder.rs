@@ -685,17 +685,18 @@ impl MockChainBuilder {
         &mut self,
         sender_account_id: AccountId,
         target_account_id: AccountId,
-        asset: &[Asset],
+        assets: &[Asset],
         note_type: NoteType,
     ) -> Result<Note, NoteError> {
-        let note = P2idNote::create(
-            sender_account_id,
-            target_account_id,
-            asset.to_vec(),
-            note_type,
-            NoteAttachments::default(),
-            &mut self.rng,
-        )?;
+        let mut builder = P2idNote::builder()
+            .sender(sender_account_id)
+            .target(target_account_id)
+            .note_type(note_type)
+            .generate_serial_number(&mut self.rng);
+        for asset in assets {
+            builder = builder.asset(*asset);
+        }
+        let note: Note = builder.build()?.into();
         self.add_output_note(RawOutputNote::Full(note.clone()));
 
         Ok(note)

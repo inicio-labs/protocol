@@ -9,7 +9,7 @@ use miden_protocol::asset::FungibleAsset;
 use miden_protocol::block::{BlockInputs, BlockNumber, ProposedBlock};
 use miden_protocol::crypto::merkle::SparseMerklePath;
 use miden_protocol::errors::ProposedBlockError;
-use miden_protocol::note::{NoteAttachments, NoteInclusionProof, NoteType};
+use miden_protocol::note::{Note, NoteInclusionProof, NoteType};
 use miden_standards::note::P2idNote;
 use miden_tx::LocalTransactionProver;
 
@@ -351,14 +351,13 @@ async fn proposed_block_fails_on_invalid_proof_or_missing_note_inclusion_referen
     let mut builder = MockChain::builder();
     let account0 = builder.add_existing_mock_account(Auth::IncrNonce)?;
     let account1 = builder.add_existing_mock_account(Auth::IncrNonce)?;
-    let p2id_note = P2idNote::create(
-        account0.id(),
-        account1.id(),
-        vec![],
-        NoteType::Private,
-        NoteAttachments::default(),
-        builder.rng_mut(),
-    )?;
+    let p2id_note: Note = P2idNote::builder()
+        .sender(account0.id())
+        .target(account1.id())
+        .note_type(NoteType::Private)
+        .generate_serial_number(builder.rng_mut())
+        .build()?
+        .into();
     let spawn_note = builder.add_spawn_note([&p2id_note])?;
     let mut chain = builder.build()?;
 

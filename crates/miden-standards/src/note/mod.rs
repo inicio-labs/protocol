@@ -16,6 +16,7 @@ mod mint;
 pub use mint::{MintNote, MintNoteStorage};
 
 mod p2id;
+pub use p2id::SCRIPT_ROOT as P2ID_SCRIPT_ROOT;
 pub use p2id::{P2idNote, P2idNoteStorage};
 
 mod p2ide;
