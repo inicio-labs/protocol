@@ -84,14 +84,17 @@ async fn test_send_note_script_basic_wallet() -> anyhow::Result<()> {
         "test should use max num of attachments"
     );
 
-    let p2id_note = P2idNote::create(
-        sender_basic_wallet_account.id(),
-        sender_basic_wallet_account.id(),
-        vec![sent_asset0, sent_asset2],
-        NoteType::Public,
-        attachments,
-        &mut rng,
-    )?;
+    let mut builder = P2idNote::builder()
+        .sender(sender_basic_wallet_account.id())
+        .target(sender_basic_wallet_account.id())
+        .note_type(NoteType::Public)
+        .asset(sent_asset0)
+        .asset(sent_asset2)
+        .generate_serial_number(&mut rng);
+    for attachment in attachments.iter().cloned() {
+        builder = builder.attachment(attachment);
+    }
+    let p2id_note: Note = builder.build()?.into();
     let partial_note = PartialNote::from(p2id_note.clone());
 
     let expiration_delta = 10u16;

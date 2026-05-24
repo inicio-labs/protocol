@@ -2,6 +2,10 @@
 
 ## v0.16.0 (TBD)
 
+### Changes
+
+- [BREAKING] Replaced `P2idNote::create` factory with a `bon`-based typestate builder. Construct via `P2idNote::builder().sender(..).target(..)..build()?` and convert with `Note::from(_)`. Added `.asset()`, `.attachment()`, `.generate_serial_number()` builder methods and a `SCRIPT_ROOT` static accessor ([#2283](https://github.com/0xMiden/protocol/issues/2283)).
+
 ## v0.15.0 (2026-05-22)
 
 ### Features

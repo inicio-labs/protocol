@@ -886,23 +886,24 @@ async fn test_get_asset_info() -> anyhow::Result<()> {
 
     let mock_chain = builder.build()?;
 
-    let output_note_0 = P2idNote::create(
-        account.id(),
-        ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE.try_into()?,
-        vec![fungible_asset_0],
-        NoteType::Public,
-        NoteAttachments::default(),
-        &mut RandomCoin::new(Word::from([1, 2, 3, 4u32])),
-    )?;
+    let output_note_0: Note = P2idNote::builder()
+        .sender(account.id())
+        .target(ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE.try_into()?)
+        .note_type(NoteType::Public)
+        .asset(fungible_asset_0)
+        .generate_serial_number(&mut RandomCoin::new(Word::from([1, 2, 3, 4u32])))
+        .build()?
+        .into();
 
-    let output_note_1 = P2idNote::create(
-        account.id(),
-        ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE.try_into()?,
-        vec![fungible_asset_0, fungible_asset_1],
-        NoteType::Public,
-        NoteAttachments::default(),
-        &mut RandomCoin::new(Word::from([4, 3, 2, 1u32])),
-    )?;
+    let output_note_1: Note = P2idNote::builder()
+        .sender(account.id())
+        .target(ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE.try_into()?)
+        .note_type(NoteType::Public)
+        .asset(fungible_asset_0)
+        .asset(fungible_asset_1)
+        .generate_serial_number(&mut RandomCoin::new(Word::from([4, 3, 2, 1u32])))
+        .build()?
+        .into();
 
     let tx_script_src = &format!(
         r#"
@@ -1016,14 +1017,14 @@ async fn test_get_recipient_and_metadata() -> anyhow::Result<()> {
 
     let mock_chain = builder.build()?;
 
-    let output_note = P2idNote::create(
-        account.id(),
-        ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE.try_into()?,
-        vec![FungibleAsset::mock(5)],
-        NoteType::Public,
-        NoteAttachments::default(),
-        &mut RandomCoin::new(Word::from([1, 2, 3, 4u32])),
-    )?;
+    let output_note: Note = P2idNote::builder()
+        .sender(account.id())
+        .target(ACCOUNT_ID_REGULAR_PUBLIC_ACCOUNT_IMMUTABLE_CODE.try_into()?)
+        .note_type(NoteType::Public)
+        .asset(FungibleAsset::mock(5))
+        .generate_serial_number(&mut RandomCoin::new(Word::from([1, 2, 3, 4u32])))
+        .build()?
+        .into();
 
     let tx_script_src = &format!(
         r#"
