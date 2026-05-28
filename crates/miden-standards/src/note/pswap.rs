@@ -236,6 +236,43 @@ impl From<PswapNoteAttachment> for NoteAttachment {
     }
 }
 
+/// Parses a [`NoteAttachment`] back into a typed [`PswapNoteAttachment`].
+///
+/// Validates that:
+/// - the scheme is [`PswapNote::PSWAP_ATTACHMENT_SCHEME`];
+/// - the content is exactly one word (`num_words == 1`);
+/// - the word's `amount` slot is a valid [`AssetAmount`];
+/// - the word's `depth` slot fits in a `u32` and is non-zero.
+///
+/// The trailing slot (`word[3]`) is not asserted to be zero: PSWAP_ATTACHMENT_SCHEME's
+/// canonical encoding leaves it for forward compatibility.
+impl TryFrom<&NoteAttachment> for PswapNoteAttachment {
+    type Error = NoteError;
+
+    fn try_from(attachment: &NoteAttachment) -> Result<Self, Self::Error> {
+        if attachment.attachment_scheme() != PswapNote::PSWAP_ATTACHMENT_SCHEME {
+            return Err(NoteError::other("attachment scheme is not PSWAP_ATTACHMENT_SCHEME"));
+        }
+        let words = attachment.content().as_words();
+        if words.len() != 1 {
+            return Err(NoteError::other("PSWAP attachment must encode exactly one word"));
+        }
+        let word = words[0];
+
+        let amount = AssetAmount::new(word[0].as_canonical_u64()).map_err(|e| {
+            NoteError::other_with_source("PSWAP attachment amount is not a valid asset amount", e)
+        })?;
+
+        let depth_raw = word[PswapNote::PARENT_ATTACHMENT_DEPTH_OFFSET].as_canonical_u64();
+        let depth_u32 = u32::try_from(depth_raw)
+            .map_err(|_| NoteError::other("PSWAP attachment depth does not fit in u32"))?;
+        let depth = NonZeroU32::new(depth_u32)
+            .ok_or_else(|| NoteError::other("PSWAP attachment depth must be non-zero"))?;
+
+        Ok(Self { amount, order_id: word[1], depth })
+    }
+}
+
 // PSWAP NOTE
 // ================================================================================================
 
@@ -380,22 +417,15 @@ impl PswapNote {
     ///
     /// The next round's `current_depth` is computed as `parent_depth() + 1`, matching the
     /// on-chain `get_current_depth` MASM procedure. Use [`Self::next_depth`] for the typed
-    /// [`NonZeroU32`] form.
+    /// [`NonZeroU32`] form. A malformed `PSWAP_ATTACHMENT_SCHEME` attachment (depth out of
+    /// `u32` range, depth == 0, etc.) is treated as if no attachment is present, so discovery
+    /// degrades to "looks like an original" rather than corrupting downstream arithmetic.
     pub fn parent_depth(&self) -> u32 {
-        match self.attachment.as_ref() {
-            Some(att) if att.attachment_scheme() == Self::PSWAP_ATTACHMENT_SCHEME => {
-                // The depth value is written by this crate (Group B's TryFrom enforces u32
-                // range on read); treat out-of-range as a corrupted attachment and fall back
-                // to 0 so discovery on a malformed note degrades to "looks like an original"
-                // rather than corrupting downstream arithmetic.
-                u32::try_from(
-                    att.content().as_words()[0][Self::PARENT_ATTACHMENT_DEPTH_OFFSET]
-                        .as_canonical_u64(),
-                )
-                .unwrap_or(0)
-            },
-            _ => 0,
-        }
+        self.attachment
+            .as_ref()
+            .and_then(|att| PswapNoteAttachment::try_from(att).ok())
+            .map(|att| att.depth().get())
+            .unwrap_or(0)
     }
 
     /// Returns the depth that the next-round payback / remainder should carry, equal to
@@ -726,20 +756,6 @@ impl PswapNote {
         Ok(amount)
     }
 
-    /// Builds the [`NoteAttachment`] carried by both PSWAP output notes (payback and
-    /// remainder).
-    ///
-    /// `amount` is the round's transferred amount on the relevant side of the trade -
-    /// requested-asset units for the payback, offered-asset units for the remainder.
-    fn pswap_output_attachment(
-        amount: u64,
-        order_id: Felt,
-        depth: NonZeroU32,
-    ) -> Result<NoteAttachment, NoteError> {
-        let amount = AssetAmount::new(amount)
-            .map_err(|e| NoteError::other_with_source("amount is not a valid asset amount", e))?;
-        Ok(PswapNoteAttachment::new(amount, order_id, depth).into())
-    }
 
     /// Builds a payback note (P2ID) that delivers the filled assets to the swap creator.
     ///
@@ -770,8 +786,11 @@ impl PswapNote {
             P2idNoteStorage::new(self.storage.creator_account_id).into_recipient(p2id_serial_num);
 
         let current_depth = self.next_depth()?;
-        let attachment =
-            Self::pswap_output_attachment(fill_amount, self.order_id(), current_depth)?;
+        let fill_amount_typed = AssetAmount::new(fill_amount).map_err(|e| {
+            NoteError::other_with_source("fill amount is not a valid asset amount", e)
+        })?;
+        let attachment: NoteAttachment =
+            PswapNoteAttachment::new(fill_amount_typed, self.order_id(), current_depth).into();
 
         let p2id_assets = NoteAssets::new(vec![payback_asset.into()])?;
         let p2id_metadata =
@@ -818,8 +837,11 @@ impl PswapNote {
         ]);
 
         let current_depth = self.next_depth()?;
-        let attachment =
-            Self::pswap_output_attachment(offered_amount_for_fill, self.order_id(), current_depth)?;
+        let payout_typed = AssetAmount::new(offered_amount_for_fill).map_err(|e| {
+            NoteError::other_with_source("payout amount is not a valid asset amount", e)
+        })?;
+        let attachment: NoteAttachment =
+            PswapNoteAttachment::new(payout_typed, self.order_id(), current_depth).into();
 
         PswapNote::builder()
             .sender(consumer_account_id)
@@ -1327,6 +1349,64 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(pswap.parent_depth(), 0);
+    }
+
+    /// `TryFrom<&NoteAttachment>` rejects a wrong scheme.
+    #[test]
+    fn try_from_rejects_wrong_scheme() {
+        let word = Word::from([Felt::from(1u32), Felt::from(2u32), Felt::from(1u32), ZERO]);
+        // Use NetworkAccountTarget (scheme = 2) instead of PSWAP_ATTACHMENT_SCHEME (3).
+        let other = NoteAttachment::with_word(StandardNoteAttachment::NetworkAccountTarget.attachment_scheme(), word);
+        assert!(PswapNoteAttachment::try_from(&other).is_err());
+    }
+
+    /// `TryFrom<&NoteAttachment>` rejects depth == 0 (the invariant only one path enforces).
+    #[test]
+    fn try_from_rejects_zero_depth() {
+        let word = Word::from([Felt::from(1u32), Felt::from(2u32), ZERO, ZERO]);
+        let att = NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, word);
+        assert!(PswapNoteAttachment::try_from(&att).is_err());
+    }
+
+    /// `TryFrom<&NoteAttachment>` rejects a depth value that exceeds `u32::MAX`.
+    #[test]
+    fn try_from_rejects_out_of_range_depth() {
+        let oversized = Felt::try_from(u64::from(u32::MAX) + 1).unwrap();
+        let word = Word::from([Felt::from(1u32), Felt::from(2u32), oversized, ZERO]);
+        let att = NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, word);
+        assert!(PswapNoteAttachment::try_from(&att).is_err());
+    }
+
+    /// `TryFrom<&NoteAttachment>` rejects an amount that exceeds `AssetAmount::MAX`.
+    #[test]
+    fn try_from_rejects_invalid_amount() {
+        // 2^63 > AssetAmount::MAX = 2^63 - 2^31.
+        let bad_amount = Felt::try_from(1u64 << 63).unwrap();
+        let word = Word::from([bad_amount, Felt::from(2u32), Felt::from(1u32), ZERO]);
+        let att = NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, word);
+        assert!(PswapNoteAttachment::try_from(&att).is_err());
+    }
+
+    /// `TryFrom<&NoteAttachment>` rejects an attachment whose word count is not 1 (covering the
+    /// MASM `num_words == 1` assert from the Rust side).
+    #[test]
+    fn try_from_rejects_wrong_num_words() {
+        let words = vec![Word::default(), Word::default()];
+        let multi = NoteAttachment::with_words(PswapNote::PSWAP_ATTACHMENT_SCHEME, words).unwrap();
+        assert!(PswapNoteAttachment::try_from(&multi).is_err());
+    }
+
+    /// `TryFrom<&NoteAttachment>` round-trips a valid attachment.
+    #[test]
+    fn try_from_round_trips_valid_attachment() {
+        let original = PswapNoteAttachment::new(
+            AssetAmount::new(123).unwrap(),
+            Felt::from(7u32),
+            NonZeroU32::new(5).unwrap(),
+        );
+        let encoded: NoteAttachment = original.into();
+        let decoded = PswapNoteAttachment::try_from(&encoded).unwrap();
+        assert_eq!(decoded, original);
     }
 
     /// `next_depth` propagates a `NoteError` if the parent depth is at `u32::MAX`.

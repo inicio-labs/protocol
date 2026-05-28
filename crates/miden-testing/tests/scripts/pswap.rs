@@ -33,11 +33,11 @@ const BASIC_AUTH: Auth = Auth::BasicAuth {
 // HELPERS
 // ================================================================================================
 
-/// Extracts the first attachment's word content from a `NoteAttachments`.
-fn first_attachment_word(attachments: &NoteAttachments) -> Word {
-    let content = attachments.get(0).expect("expected at least one attachment").content();
-    assert_eq!(content.num_words(), 1, "expected single word attachment");
-    content.as_words()[0]
+/// Parses the first attachment as a [`PswapNoteAttachment`], asserting it conforms to
+/// the typed scheme (single word, valid amount, non-zero u32 depth).
+fn first_pswap_attachment(attachments: &NoteAttachments) -> PswapNoteAttachment {
+    let attachment = attachments.get(0).expect("expected at least one attachment");
+    PswapNoteAttachment::try_from(attachment).expect("attachment must be a valid PSWAP attachment")
 }
 
 /// Builds a PswapNote, registers it on the builder as an output note, and returns
@@ -209,14 +209,14 @@ async fn pswap_note_alice_reconstructs_and_consumes_p2id(
     // Read attachments from the executed tx (the body is still here even when the note will
     // ultimately land on-chain as a header-only private commitment).
     let output_p2id = executed_transaction.output_notes().get_note(0);
-    let attachment_word = first_attachment_word(output_p2id.attachments());
-    let fill_amount_from_aux = attachment_word[0].as_canonical_u64();
+    let on_chain_pswap_att = first_pswap_attachment(output_p2id.attachments());
+    let fill_amount_from_aux = on_chain_pswap_att.amount().as_u64();
     assert_eq!(fill_amount_from_aux, fill_amount, "fill amount from aux should match the case");
 
     // Parity check: Rust-predicted P2ID attachment must match the MASM output.
     assert_eq!(
-        first_attachment_word(p2id_note.attachments()),
-        attachment_word,
+        first_pswap_attachment(p2id_note.attachments()),
+        on_chain_pswap_att,
         "Rust-predicted P2ID attachment does not match the MASM-produced one",
     );
 
@@ -239,8 +239,8 @@ async fn pswap_note_alice_reconstructs_and_consumes_p2id(
 
     if is_partial {
         let output_remainder = executed_transaction.output_notes().get_note(1);
-        let remainder_attachment_word = first_attachment_word(output_remainder.attachments());
-        let amt_payout_from_attachment = remainder_attachment_word[0].as_canonical_u64();
+        let remainder_pswap_att = first_pswap_attachment(output_remainder.attachments());
+        let amt_payout_from_attachment = remainder_pswap_att.amount().as_u64();
 
         let expected_payout = pswap.calculate_offered_for_requested(fill_amount_from_aux)?;
         assert_eq!(
@@ -409,16 +409,16 @@ async fn pswap_attachment_layout_matches_masm_test() -> anyhow::Result<()> {
         "remainder attachment word mismatch: expected [amt_payout, order_id, depth, 0]",
     );
 
-    // Cross-check: the Rust-predicted notes must produce the same attachment
-    // words as the on-chain executed ones.
+    // Cross-check: the Rust-predicted notes must produce the same typed attachment as the
+    // on-chain executed ones.
     assert_eq!(
-        first_attachment_word(p2id_note.attachments()),
-        p2id_att.content().as_words()[0],
+        first_pswap_attachment(p2id_note.attachments()),
+        PswapNoteAttachment::try_from(p2id_att)?,
         "Rust-predicted P2ID attachment does not match MASM output",
     );
     assert_eq!(
-        first_attachment_word(remainder_note.attachments()),
-        remainder_att.content().as_words()[0],
+        first_pswap_attachment(remainder_note.attachments()),
+        PswapNoteAttachment::try_from(remainder_att)?,
         "Rust-predicted remainder attachment does not match MASM output",
     );
 
@@ -1642,15 +1642,15 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
         let on_chain_payback = bob_tx.output_notes().get_note(0);
 
         // --- Alice reconstructs the payback from the on-chain attachment word ---
-        let attachment_word = first_attachment_word(on_chain_payback.attachments());
-        let fill_from_attachment = attachment_word[0].as_canonical_u64();
+        let on_chain_payback_att = first_pswap_attachment(on_chain_payback.attachments());
+        let fill_from_attachment = on_chain_payback_att.amount().as_u64();
         assert_eq!(
             fill_from_attachment, fill_amount,
             "round {depth}: attachment fill amount mismatch",
         );
 
         let payback_attachment = PswapNoteAttachment::new(
-            AssetAmount::new(fill_from_attachment)?,
+            on_chain_payback_att.amount(),
             original_pswap.order_id(),
             depth,
         );
@@ -1665,11 +1665,11 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
         // --- Alice reconstructs the remainder (when partial) from on-chain data alone ---
         if next_pswap_opt.is_some() {
             let on_chain_remainder = bob_tx.output_notes().get_note(1);
-            let remainder_attachment_word = first_attachment_word(on_chain_remainder.attachments());
-            let payout_from_attachment = remainder_attachment_word[0].as_canonical_u64();
+            let on_chain_remainder_att =
+                first_pswap_attachment(on_chain_remainder.attachments());
 
             let remainder_attachment = PswapNoteAttachment::new(
-                AssetAmount::new(payout_from_attachment)?,
+                on_chain_remainder_att.amount(),
                 original_pswap.order_id(),
                 depth,
             );
@@ -1812,11 +1812,8 @@ async fn pswap_disambiguates_multiple_creator_pswaps_in_same_tx() -> anyhow::Res
     // Each lineage should yield 2 notes (payback + remainder) → preallocate.
     let mut from_a: Vec<Word> = Vec::with_capacity(2);
     let mut from_b: Vec<Word> = Vec::with_capacity(2);
-    // PswapAttachment word layout is [amount, order_id, depth, 0]; order_id sits at index 1.
-    const ORDER_ID_INDEX_IN_PSWAP_ATTACHMENT: usize = 1;
     for i in 0..outputs.num_notes() {
-        let att_word = first_attachment_word(outputs.get_note(i).attachments());
-        let oid = att_word[ORDER_ID_INDEX_IN_PSWAP_ATTACHMENT];
+        let oid = first_pswap_attachment(outputs.get_note(i).attachments()).order_id();
         let digest = outputs.get_note(i).recipient_digest();
         if oid == order_id_a {
             from_a.push(digest);
