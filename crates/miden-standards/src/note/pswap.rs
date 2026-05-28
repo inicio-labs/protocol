@@ -1,4 +1,5 @@
 use alloc::vec;
+use core::num::NonZeroU32;
 
 use miden_protocol::account::AccountId;
 use miden_protocol::assembly::Path;
@@ -116,8 +117,8 @@ impl PswapNoteStorage {
     }
 
     /// Returns the requested token amount.
-    pub fn requested_asset_amount(&self) -> u64 {
-        self.requested_asset.amount().as_u64()
+    pub fn requested_asset_amount(&self) -> AssetAmount {
+        self.requested_asset.amount()
     }
 }
 
@@ -193,16 +194,20 @@ impl TryFrom<&[Felt]> for PswapNoteStorage {
 
 /// Typed attachment carried by both PSWAP output notes, encoded as
 /// `[amount, order_id, depth, 0]` under [`PswapNote::PSWAP_ATTACHMENT_SCHEME`].
+///
+/// `depth` is [`NonZeroU32`] because attachments are only stamped on payback / remainder notes
+/// (depth >= 1); the original PSWAP has no PSWAP-scheme attachment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PswapNoteAttachment {
     amount: AssetAmount,
     order_id: Felt,
-    depth: u32,
+    depth: NonZeroU32,
 }
 
 impl PswapNoteAttachment {
-    /// Creates a new [`PswapNoteAttachment`].
-    pub fn new(amount: AssetAmount, order_id: Felt, depth: u32) -> Self {
+    /// Creates a new [`PswapNoteAttachment`]. Infallible: depth is non-zero by type, and
+    /// [`AssetAmount`] is pre-validated.
+    pub fn new(amount: AssetAmount, order_id: Felt, depth: NonZeroU32) -> Self {
         Self { amount, order_id, depth }
     }
 
@@ -214,7 +219,7 @@ impl PswapNoteAttachment {
         self.order_id
     }
 
-    pub fn depth(&self) -> u32 {
+    pub fn depth(&self) -> NonZeroU32 {
         self.depth
     }
 }
@@ -224,7 +229,7 @@ impl From<PswapNoteAttachment> for NoteAttachment {
         let word = Word::from([
             Felt::from(attachment.amount),
             attachment.order_id,
-            Felt::from(attachment.depth),
+            Felt::from(attachment.depth.get()),
             ZERO,
         ]);
         NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, word)
@@ -311,34 +316,21 @@ impl PswapNote {
         PSWAP_SCRIPT.root()
     }
 
-    /// Builds the `NOTE_ARGS` word that the PSWAP script expects when a
-    /// consumer wants to fill part of the swap:
-    ///
-    /// `[account_fill, note_fill, 0, 0]`
+    /// Builds the `NOTE_ARGS` word that the PSWAP script expects when a consumer wants to fill
+    /// part of the swap: `[account_fill, note_fill, 0, 0]`.
     ///
     /// - `account_fill` is the portion of the requested asset the consumer pays out of their own
     ///   vault.
-    /// - `note_fill` is the portion sourced from another note in the same transaction (cross-swap /
-    ///   net-zero flow).
+    /// - `note_fill` is the portion sourced from another note in the same transaction (cross-swap
+    ///   / net-zero flow).
     ///
-    /// Both values are in the requested asset's base units. In a network
-    /// transaction the kernel defaults `NOTE_ARGS` to `[0, 0, 0, 0]` and the
-    /// script falls back to a full fill, so this helper is only needed for
-    /// local transactions where the consumer is choosing the fill split.
+    /// Both values are in the requested asset's base units. In a network transaction the kernel
+    /// defaults `NOTE_ARGS` to `[0, 0, 0, 0]` and the script falls back to a full fill, so this
+    /// helper is only needed for local transactions where the consumer chooses the fill split.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if either value exceeds the Goldilocks field size
-    /// (i.e. cannot be represented as a [`Felt`]). In practice this cannot
-    /// happen for any amount that fits in a [`FungibleAsset`] —
-    /// `FungibleAsset::MAX_AMOUNT` is comfortably below `2^63` — but the
-    /// conversion is surfaced explicitly rather than hidden behind a panic.
-    pub fn create_args(account_fill: u64, note_fill: u64) -> Result<Word, NoteError> {
-        let account_fill = Felt::try_from(account_fill)
-            .map_err(|e| NoteError::other_with_source("account_fill is not a valid felt", e))?;
-        let note_fill = Felt::try_from(note_fill)
-            .map_err(|e| NoteError::other_with_source("note_fill is not a valid felt", e))?;
-        Ok(Word::from([account_fill, note_fill, ZERO, ZERO]))
+    /// Infallible: [`AssetAmount`] is bounded by `2^63 - 2^31`, which fits in a [`Felt`].
+    pub fn create_args(account_fill: AssetAmount, note_fill: AssetAmount) -> Word {
+        Word::from([Felt::from(account_fill), Felt::from(note_fill), ZERO, ZERO])
     }
 
     /// Returns the account ID of the note sender.
@@ -387,15 +379,36 @@ impl PswapNote {
     /// remainder produced by an earlier fill).
     ///
     /// The next round's `current_depth` is computed as `parent_depth() + 1`, matching the
-    /// on-chain `get_current_depth` MASM procedure.
-    pub fn parent_depth(&self) -> u64 {
+    /// on-chain `get_current_depth` MASM procedure. Use [`Self::next_depth`] for the typed
+    /// [`NonZeroU32`] form.
+    pub fn parent_depth(&self) -> u32 {
         match self.attachment.as_ref() {
             Some(att) if att.attachment_scheme() == Self::PSWAP_ATTACHMENT_SCHEME => {
-                let attachment_word = att.content().as_words()[0];
-                attachment_word[Self::PARENT_ATTACHMENT_DEPTH_OFFSET].as_canonical_u64()
+                // The depth value is written by this crate (Group B's TryFrom enforces u32
+                // range on read); treat out-of-range as a corrupted attachment and fall back
+                // to 0 so discovery on a malformed note degrades to "looks like an original"
+                // rather than corrupting downstream arithmetic.
+                u32::try_from(
+                    att.content().as_words()[0][Self::PARENT_ATTACHMENT_DEPTH_OFFSET]
+                        .as_canonical_u64(),
+                )
+                .unwrap_or(0)
             },
             _ => 0,
         }
+    }
+
+    /// Returns the depth that the next-round payback / remainder should carry, equal to
+    /// `parent_depth() + 1`. Always non-zero by construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `parent_depth()` is [`u32::MAX`].
+    pub fn next_depth(&self) -> Result<NonZeroU32, NoteError> {
+        self.parent_depth()
+            .checked_add(1)
+            .and_then(NonZeroU32::new)
+            .ok_or_else(|| NoteError::other("PSWAP depth overflow"))
     }
 
     // INSTANCE METHODS
@@ -412,11 +425,12 @@ impl PswapNote {
         let requested_faucet_id = self.storage.requested_faucet_id();
         let total_requested_amount = self.storage.requested_asset_amount();
 
-        let fill_asset = FungibleAsset::new(requested_faucet_id, total_requested_amount)
-            .map_err(|e| NoteError::other_with_source("failed to create full fill asset", e))?
-            .with_callbacks(self.storage.requested_asset().callbacks());
+        let fill_asset =
+            FungibleAsset::new(requested_faucet_id, total_requested_amount.as_u64())
+                .map_err(|e| NoteError::other_with_source("failed to create full fill asset", e))?
+                .with_callbacks(self.storage.requested_asset().callbacks());
 
-        self.create_payback_note(consumer_account_id, fill_asset, total_requested_amount)
+        self.create_payback_note(consumer_account_id, fill_asset, total_requested_amount.as_u64())
     }
 
     /// Executes the swap, producing the output notes for a given fill.
@@ -459,7 +473,7 @@ impl PswapNote {
 
         let total_offered_amount = self.offered_asset.amount().as_u64();
         let requested_faucet_id = self.storage.requested_faucet_id();
-        let total_requested_amount = self.storage.requested_asset_amount();
+        let total_requested_amount = self.storage.requested_asset_amount().as_u64();
 
         // Validate fill amount
         if fill_amount == 0 {
@@ -536,7 +550,7 @@ impl PswapNote {
     ///
     /// Returns an error if the calculated payout is not a valid asset amount.
     pub fn calculate_offered_for_requested(&self, fill_amount: u64) -> Result<u64, NoteError> {
-        let total_requested = self.storage.requested_asset_amount();
+        let total_requested = self.storage.requested_asset_amount().as_u64();
         let total_offered = self.offered_asset.amount().as_u64();
 
         Self::calculate_output_amount(total_offered, total_requested, fill_amount)
@@ -554,17 +568,13 @@ impl PswapNote {
     ///
     /// # Errors
     ///
-    /// Returns an error if `attachment.depth() == 0` or if the fill amount is not a valid
-    /// asset amount.
+    /// Returns an error if the fill amount is not a valid asset amount.
     pub fn payback_note(
         &self,
         consumer_account_id: AccountId,
         attachment: &PswapNoteAttachment,
     ) -> Result<Note, NoteError> {
-        let depth = attachment.depth();
-        if depth == 0 {
-            return Err(NoteError::other("depth must be >= 1"));
-        }
+        let depth = attachment.depth().get();
         let parent_depth = Felt::from(depth - 1);
         let p2id_serial = Word::from([
             self.serial_number[0] + ONE,
@@ -609,8 +619,7 @@ impl PswapNote {
     ///
     /// # Errors
     ///
-    /// Returns an error if `attachment.depth() == 0` or if any amount is not a valid asset
-    /// amount.
+    /// Returns an error if any amount is not a valid asset amount.
     pub fn remainder_note(
         &self,
         consumer_account_id: AccountId,
@@ -618,10 +627,7 @@ impl PswapNote {
         remaining_offered: AssetAmount,
         remaining_requested: AssetAmount,
     ) -> Result<Note, NoteError> {
-        let depth = attachment.depth();
-        if depth == 0 {
-            return Err(NoteError::other("depth must be >= 1"));
-        }
+        let depth = attachment.depth().get();
         let remainder_serial = Word::from([
             self.serial_number[0],
             self.serial_number[1],
@@ -723,17 +729,15 @@ impl PswapNote {
     /// Builds the [`NoteAttachment`] carried by both PSWAP output notes (payback and
     /// remainder).
     ///
-    /// `amount` is the round's transferred amount on the relevant side of the trade —
+    /// `amount` is the round's transferred amount on the relevant side of the trade -
     /// requested-asset units for the payback, offered-asset units for the remainder.
     fn pswap_output_attachment(
         amount: u64,
         order_id: Felt,
-        depth: u64,
+        depth: NonZeroU32,
     ) -> Result<NoteAttachment, NoteError> {
         let amount = AssetAmount::new(amount)
             .map_err(|e| NoteError::other_with_source("amount is not a valid asset amount", e))?;
-        let depth = u32::try_from(depth)
-            .map_err(|_| NoteError::other("PSWAP depth does not fit in u32"))?;
         Ok(PswapNoteAttachment::new(amount, order_id, depth).into())
     }
 
@@ -765,7 +769,7 @@ impl PswapNote {
         let recipient =
             P2idNoteStorage::new(self.storage.creator_account_id).into_recipient(p2id_serial_num);
 
-        let current_depth = self.parent_depth() + 1;
+        let current_depth = self.next_depth()?;
         let attachment =
             Self::pswap_output_attachment(fill_amount, self.order_id(), current_depth)?;
 
@@ -813,7 +817,7 @@ impl PswapNote {
             self.serial_number[3] + ONE,
         ]);
 
-        let current_depth = self.parent_depth() + 1;
+        let current_depth = self.next_depth()?;
         let attachment =
             Self::pswap_output_attachment(offered_amount_for_fill, self.order_id(), current_depth)?;
 
@@ -1049,7 +1053,7 @@ mod tests {
 
         let parsed = PswapNoteStorage::try_from(storage_items.as_slice()).unwrap();
         assert_eq!(parsed.creator_account_id(), creator_id);
-        assert_eq!(parsed.requested_asset_amount(), 500);
+        assert_eq!(parsed.requested_asset_amount(), AssetAmount::new(500).unwrap());
     }
 
     #[test]
@@ -1066,7 +1070,7 @@ mod tests {
         let parsed = PswapNoteStorage::try_from(note_storage.items()).unwrap();
 
         assert_eq!(parsed.creator_account_id(), creator_id);
-        assert_eq!(parsed.requested_asset_amount(), 500);
+        assert_eq!(parsed.requested_asset_amount(), AssetAmount::new(500).unwrap());
     }
 
     /// Consumer supplies both an account fill and a note fill, and the sum is below
@@ -1104,7 +1108,7 @@ mod tests {
         // Remainder must exist with the unfilled 50 - 30 = 20 of requested, and the
         // offered amount reduced proportionally (100 - 30*2 = 40).
         let remainder = remainder.expect("partial fill should produce remainder");
-        assert_eq!(remainder.storage().requested_asset_amount(), 20);
+        assert_eq!(remainder.storage().requested_asset_amount(), AssetAmount::new(20).unwrap());
         assert_eq!(remainder.offered_asset().amount().as_u64(), 40);
         assert_eq!(remainder.storage().creator_account_id(), creator_id);
     }
@@ -1187,8 +1191,9 @@ mod tests {
         );
 
         // --- payback_note() reconstruction ---
+        let depth_one = NonZeroU32::new(1).unwrap();
         let payback_attachment =
-            PswapNoteAttachment::new(AssetAmount::new(20).unwrap(), pswap.order_id(), 1);
+            PswapNoteAttachment::new(AssetAmount::new(20).unwrap(), pswap.order_id(), depth_one);
         let reconstructed_payback = pswap.payback_note(consumer_id, &payback_attachment).unwrap();
         let Asset::Fungible(fa) = reconstructed_payback.assets().iter().next().unwrap() else {
             panic!("expected fungible payback asset");
@@ -1201,7 +1206,7 @@ mod tests {
 
         // --- remainder_note() reconstruction ---
         let remainder_attachment =
-            PswapNoteAttachment::new(AssetAmount::new(40).unwrap(), pswap.order_id(), 1);
+            PswapNoteAttachment::new(AssetAmount::new(40).unwrap(), pswap.order_id(), depth_one);
         let reconstructed_remainder = pswap
             .remainder_note(
                 consumer_id,
@@ -1218,5 +1223,137 @@ mod tests {
             AssetCallbackFlag::Enabled,
             "remainder_note must preserve offered asset's callback flag",
         );
+    }
+
+    /// `create_args` is infallible at the type level because `AssetAmount` fits in a `Felt`.
+    /// `MAX` round-trips through the resulting word.
+    #[test]
+    fn create_args_round_trips_max_asset_amount() {
+        let args = PswapNote::create_args(AssetAmount::MAX, AssetAmount::ZERO);
+        assert_eq!(args[0], Felt::from(AssetAmount::MAX));
+        assert_eq!(args[1], ZERO);
+        assert_eq!(args[2], ZERO);
+        assert_eq!(args[3], ZERO);
+    }
+
+    /// `PswapNoteAttachment` accessors mirror what was passed to `new`.
+    #[test]
+    fn pswap_note_attachment_accessors() {
+        let order_id = Felt::from(42u32);
+        let depth = NonZeroU32::new(3).unwrap();
+        let attachment = PswapNoteAttachment::new(AssetAmount::new(100).unwrap(), order_id, depth);
+        assert_eq!(attachment.amount(), AssetAmount::new(100).unwrap());
+        assert_eq!(attachment.order_id(), order_id);
+        assert_eq!(attachment.depth(), depth);
+    }
+
+    /// `From<PswapNoteAttachment> for NoteAttachment` encodes the depth via `.get()`.
+    #[test]
+    fn pswap_note_attachment_encodes_depth_via_get() {
+        let depth = NonZeroU32::new(7).unwrap();
+        let attachment =
+            PswapNoteAttachment::new(AssetAmount::new(50).unwrap(), Felt::from(9u32), depth);
+        let note_att: NoteAttachment = attachment.into();
+        let word = note_att.content().as_words()[0];
+        assert_eq!(word[2], Felt::from(7u32));
+    }
+
+    /// `parent_depth` returns 0 when the note has no attachment.
+    #[test]
+    fn parent_depth_zero_when_no_attachment() {
+        let creator_id = dummy_creator_id();
+        let offered_asset = FungibleAsset::new(dummy_faucet_id(0xaa), 100).unwrap();
+        let requested_asset = FungibleAsset::new(dummy_faucet_id(0xbb), 50).unwrap();
+        let (pswap, _) = build_pswap_note(offered_asset, requested_asset, creator_id);
+        assert_eq!(pswap.parent_depth(), 0);
+        assert_eq!(pswap.next_depth().unwrap().get(), 1);
+    }
+
+    /// `parent_depth` returns the stored depth when the note carries a PSWAP attachment.
+    #[test]
+    fn parent_depth_reads_attachment_depth() {
+        let creator_id = dummy_creator_id();
+        let offered_asset = FungibleAsset::new(dummy_faucet_id(0xaa), 100).unwrap();
+        let requested_asset = FungibleAsset::new(dummy_faucet_id(0xbb), 50).unwrap();
+        let mut rng = RandomCoin::new(Word::default());
+        let storage = PswapNoteStorage::builder()
+            .requested_asset(requested_asset)
+            .creator_account_id(creator_id)
+            .build();
+        let order_id = Felt::from(1u32);
+        let attachment = PswapNoteAttachment::new(
+            AssetAmount::new(10).unwrap(),
+            order_id,
+            NonZeroU32::new(4).unwrap(),
+        );
+        let pswap = PswapNote::builder()
+            .sender(creator_id)
+            .storage(storage)
+            .serial_number(rng.draw_word())
+            .note_type(NoteType::Public)
+            .offered_asset(offered_asset)
+            .attachment(attachment.into())
+            .build()
+            .unwrap();
+        assert_eq!(pswap.parent_depth(), 4);
+        assert_eq!(pswap.next_depth().unwrap().get(), 5);
+    }
+
+    /// `parent_depth` falls back to 0 when the attachment encodes a depth outside `u32` range
+    /// (treated as corrupted by external construction; downstream arithmetic is left
+    /// well-defined).
+    #[test]
+    fn parent_depth_zero_on_out_of_range_attachment() {
+        let creator_id = dummy_creator_id();
+        let offered_asset = FungibleAsset::new(dummy_faucet_id(0xaa), 100).unwrap();
+        let requested_asset = FungibleAsset::new(dummy_faucet_id(0xbb), 50).unwrap();
+        let mut rng = RandomCoin::new(Word::default());
+        let storage = PswapNoteStorage::builder()
+            .requested_asset(requested_asset)
+            .creator_account_id(creator_id)
+            .build();
+        // Stamp a raw word with a depth exceeding u32::MAX.
+        let oversized_depth = Felt::try_from(u64::from(u32::MAX) + 1).unwrap();
+        let word = Word::from([Felt::from(1u32), Felt::from(1u32), oversized_depth, ZERO]);
+        let raw_attachment =
+            NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, word);
+        let pswap = PswapNote::builder()
+            .sender(creator_id)
+            .storage(storage)
+            .serial_number(rng.draw_word())
+            .note_type(NoteType::Public)
+            .offered_asset(offered_asset)
+            .attachment(raw_attachment)
+            .build()
+            .unwrap();
+        assert_eq!(pswap.parent_depth(), 0);
+    }
+
+    /// `next_depth` propagates a `NoteError` if the parent depth is at `u32::MAX`.
+    #[test]
+    fn next_depth_errors_on_u32_overflow() {
+        let creator_id = dummy_creator_id();
+        let offered_asset = FungibleAsset::new(dummy_faucet_id(0xaa), 100).unwrap();
+        let requested_asset = FungibleAsset::new(dummy_faucet_id(0xbb), 50).unwrap();
+        let mut rng = RandomCoin::new(Word::default());
+        let storage = PswapNoteStorage::builder()
+            .requested_asset(requested_asset)
+            .creator_account_id(creator_id)
+            .build();
+        let attachment = PswapNoteAttachment::new(
+            AssetAmount::new(1).unwrap(),
+            Felt::from(1u32),
+            NonZeroU32::new(u32::MAX).unwrap(),
+        );
+        let pswap = PswapNote::builder()
+            .sender(creator_id)
+            .storage(storage)
+            .serial_number(rng.draw_word())
+            .note_type(NoteType::Public)
+            .offered_asset(offered_asset)
+            .attachment(attachment.into())
+            .build()
+            .unwrap();
+        assert!(pswap.next_depth().is_err());
     }
 }
