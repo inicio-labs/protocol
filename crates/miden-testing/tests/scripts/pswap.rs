@@ -7,11 +7,13 @@ use miden_protocol::account::{Account, AccountId, AccountType, AccountVaultDelta
 use miden_protocol::asset::{Asset, AssetAmount, FungibleAsset};
 use miden_protocol::crypto::rand::{FeltRng, RandomCoin};
 use miden_protocol::errors::MasmError;
-use miden_protocol::note::{Note, NoteAttachments, NoteType};
+use miden_protocol::note::{Note, NoteAttachment, NoteAttachments, NoteType};
 use miden_protocol::transaction::RawOutputNote;
 use miden_protocol::{Felt, ONE, Word, ZERO};
 use miden_standards::account::wallets::BasicWallet;
 use miden_standards::errors::standards::{
+    ERR_PSWAP_ATTACHMENT_DEPTH_NOT_U32,
+    ERR_PSWAP_ATTACHMENT_WRONG_NUM_WORDS,
     ERR_PSWAP_FILL_EXCEEDS_REQUESTED,
     ERR_PSWAP_FILL_SUM_OVERFLOW,
     ERR_PSWAP_NOT_VALID_ASSET_AMOUNT,
@@ -906,6 +908,119 @@ async fn pswap_note_fill_sum_u64_overflow_via_raw_args() -> anyhow::Result<()> {
 
     let result = tx_context.execute().await;
     assert_transaction_executor_error!(result, ERR_PSWAP_FILL_SUM_OVERFLOW);
+
+    Ok(())
+}
+
+/// `get_current_depth` must reject a PSWAP-scheme attachment whose word count is not 1.
+/// Multi-word attachments could overwrite memory beyond `@locals(4)` if consumed without
+/// checking, so the MASM asserts `num_words == 1` before any `loc_load`.
+#[tokio::test]
+async fn pswap_assert_attachment_wrong_num_words() -> anyhow::Result<()> {
+    let mut builder = MockChain::builder();
+    let usdc_faucet = builder.add_existing_basic_faucet(BASIC_AUTH, "USDC", 1000, Some(50))?;
+    let eth_faucet = builder.add_existing_basic_faucet(BASIC_AUTH, "ETH", 1000, Some(50))?;
+    let alice = builder.add_existing_wallet_with_assets(
+        BASIC_AUTH,
+        [FungibleAsset::new(usdc_faucet.id(), 50)?.into()],
+    )?;
+    let bob = builder.add_existing_wallet_with_assets(
+        BASIC_AUTH,
+        [FungibleAsset::new(eth_faucet.id(), 10)?.into()],
+    )?;
+
+    // Stamp a two-word PSWAP attachment on the original PSWAP note (only possible via the
+    // raw NoteAttachment::with_words API; the typed PswapNoteAttachment cannot encode this).
+    let bogus_words = vec![Word::default(), Word::default()];
+    let bogus_attachment =
+        NoteAttachment::with_words(PswapNote::PSWAP_ATTACHMENT_SCHEME, bogus_words)?;
+
+    let mut rng = RandomCoin::new(Word::default());
+    let storage = PswapNoteStorage::builder()
+        .requested_asset(FungibleAsset::new(eth_faucet.id(), 25)?)
+        .creator_account_id(alice.id())
+        .build();
+    let pswap = PswapNote::builder()
+        .sender(alice.id())
+        .storage(storage)
+        .serial_number(rng.draw_word())
+        .note_type(NoteType::Public)
+        .offered_asset(FungibleAsset::new(usdc_faucet.id(), 50)?)
+        .attachment(bogus_attachment)
+        .build()?;
+    let pswap_note: Note = pswap.clone().into();
+    builder.add_output_note(RawOutputNote::Full(pswap_note.clone()));
+
+    let mock_chain = builder.build()?;
+
+    let mut note_args_map = BTreeMap::new();
+    note_args_map.insert(
+        pswap_note.id(),
+        PswapNote::create_args(AssetAmount::new(10)?, AssetAmount::ZERO),
+    );
+
+    let tx_context = mock_chain
+        .build_tx_context(bob.id(), &[pswap_note.id()], &[])?
+        .extend_note_args(note_args_map)
+        .build()?;
+    let result = tx_context.execute().await;
+    assert_transaction_executor_error!(result, ERR_PSWAP_ATTACHMENT_WRONG_NUM_WORDS);
+
+    Ok(())
+}
+
+/// `get_current_depth` must reject a PSWAP-scheme attachment whose depth slot exceeds u32::MAX.
+/// The Rust side only ever writes u32 depths; a larger felt indicates a forged attachment.
+#[tokio::test]
+async fn pswap_assert_attachment_depth_not_u32() -> anyhow::Result<()> {
+    let mut builder = MockChain::builder();
+    let usdc_faucet = builder.add_existing_basic_faucet(BASIC_AUTH, "USDC", 1000, Some(50))?;
+    let eth_faucet = builder.add_existing_basic_faucet(BASIC_AUTH, "ETH", 1000, Some(50))?;
+    let alice = builder.add_existing_wallet_with_assets(
+        BASIC_AUTH,
+        [FungibleAsset::new(usdc_faucet.id(), 50)?.into()],
+    )?;
+    let bob = builder.add_existing_wallet_with_assets(
+        BASIC_AUTH,
+        [FungibleAsset::new(eth_faucet.id(), 10)?.into()],
+    )?;
+
+    // Stamp [amount, order_id, oversized_depth, 0] where oversized_depth > u32::MAX.
+    let oversized_depth = Felt::try_from(u64::from(u32::MAX) + 1).expect("fits in a felt");
+    let bogus_word = Word::from([Felt::from(1u32), Felt::from(1u32), oversized_depth, ZERO]);
+    let bogus_attachment =
+        NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, bogus_word);
+
+    let mut rng = RandomCoin::new(Word::default());
+    let storage = PswapNoteStorage::builder()
+        .requested_asset(FungibleAsset::new(eth_faucet.id(), 25)?)
+        .creator_account_id(alice.id())
+        .build();
+    let pswap = PswapNote::builder()
+        .sender(alice.id())
+        .storage(storage)
+        .serial_number(rng.draw_word())
+        .note_type(NoteType::Public)
+        .offered_asset(FungibleAsset::new(usdc_faucet.id(), 50)?)
+        .attachment(bogus_attachment)
+        .build()?;
+    let pswap_note: Note = pswap.clone().into();
+    builder.add_output_note(RawOutputNote::Full(pswap_note.clone()));
+
+    let mock_chain = builder.build()?;
+
+    let mut note_args_map = BTreeMap::new();
+    note_args_map.insert(
+        pswap_note.id(),
+        PswapNote::create_args(AssetAmount::new(10)?, AssetAmount::ZERO),
+    );
+
+    let tx_context = mock_chain
+        .build_tx_context(bob.id(), &[pswap_note.id()], &[])?
+        .extend_note_args(note_args_map)
+        .build()?;
+    let result = tx_context.execute().await;
+    assert_transaction_executor_error!(result, ERR_PSWAP_ATTACHMENT_DEPTH_NOT_U32);
 
     Ok(())
 }
