@@ -299,6 +299,7 @@ impl PswapNote {
     ///
     /// Returns an error if:
     /// - Both assets are `None`.
+    /// - Either fill asset's faucet does not match the requested faucet.
     /// - The fill amount is zero.
     /// - The fill amount exceeds the total requested amount.
     pub fn execute(
@@ -307,6 +308,20 @@ impl PswapNote {
         account_fill_asset: Option<FungibleAsset>,
         note_fill_asset: Option<FungibleAsset>,
     ) -> Result<(Note, Option<PswapNote>), NoteError> {
+        // Reject fill assets that aren't of the requested faucet. `FungibleAsset::add` catches
+        // mismatched faucets only when both fill sources are present; the single-source arms
+        // below bypass `add`, so a wrong-faucet asset would otherwise mint a payback note whose
+        // asset disagrees with the storage's `requested_faucet_id` (the MASM rejects it
+        // on-chain, but client-side reconstruction must catch it first).
+        let requested_faucet_id = self.storage.requested_faucet_id();
+        for fill in [account_fill_asset, note_fill_asset].iter().flatten() {
+            if fill.faucet_id() != requested_faucet_id {
+                return Err(NoteError::other(
+                    "fill asset faucet does not match the requested faucet",
+                ));
+            }
+        }
+
         // Combine account fill and note fill into a single payback asset.
         let payback_asset = match (account_fill_asset, note_fill_asset) {
             (Some(account_fill), Some(note_fill)) => account_fill.add(note_fill).map_err(|e| {
@@ -415,6 +430,10 @@ impl PswapNote {
     /// Reconstructs the depth-`d` payback P2ID [`Note`], so the creator can consume it as an
     /// unauthenticated input note.
     ///
+    /// Must be called on the original PSWAP (depth-0 root of the lineage); the serial advance
+    /// uses the absolute lineage depth and produces incorrect serials when called on a
+    /// remainder mid-lineage.
+    ///
     /// `consumer_account_id` must be the account that consumed the parent PSWAP in round
     /// `depth`: the MASM stamps it as the payback's metadata sender, which feeds into
     /// [`Note::details_commitment`].
@@ -458,6 +477,9 @@ impl PswapNote {
     }
 
     /// Reconstructs the depth-`d` remainder PSWAP [`Note`] in this lineage.
+    ///
+    /// Must be called on the original PSWAP (depth-0 root of the lineage); calling on a
+    /// remainder mid-lineage over-advances the serial and reconstructs the wrong note.
     ///
     /// Called on the original PSWAP, this returns the full Note for the remainder produced
     /// in round `depth`. The returned Note matches the created note exactly.

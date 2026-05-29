@@ -578,6 +578,30 @@ fn pswap_builder_rejects_zero_offered_amount() {
     assert!(result.is_err(), "zero offered amount must be rejected");
 }
 
+/// `PswapNote::execute` rejects a single fill asset whose faucet differs from the requested
+/// faucet (the previously-uncovered single-source path that bypassed `FungibleAsset::add`'s
+/// own faucet check).
+#[test]
+fn pswap_execute_rejects_fill_asset_of_wrong_faucet() {
+    let creator_id = dummy_creator_id();
+    let consumer_id = dummy_consumer_id();
+    let offered_faucet = dummy_faucet_id(0xaa);
+    let requested_faucet = dummy_faucet_id(0xbb);
+    let wrong_faucet = dummy_faucet_id(0xcc);
+
+    let offered_asset = FungibleAsset::new(offered_faucet, 100).unwrap();
+    let requested_asset = FungibleAsset::new(requested_faucet, 50).unwrap();
+    let (pswap, _) = build_pswap_note(offered_asset, requested_asset, creator_id);
+
+    // Wrong-faucet account fill asset (single source: would have skipped `add`'s check).
+    let bad_account_fill = FungibleAsset::new(wrong_faucet, 10).unwrap();
+    assert!(pswap.execute(consumer_id, Some(bad_account_fill), None).is_err());
+
+    // Wrong-faucet note fill asset (single source on the other arm).
+    let bad_note_fill = FungibleAsset::new(wrong_faucet, 10).unwrap();
+    assert!(pswap.execute(consumer_id, None, Some(bad_note_fill)).is_err());
+}
+
 /// `PswapNoteStorage::requested_asset_id` exposes the faucet ID as a 2-felt [`AssetId`].
 #[test]
 fn requested_asset_id_packs_faucet_id() {
