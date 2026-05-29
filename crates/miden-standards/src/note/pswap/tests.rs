@@ -534,6 +534,50 @@ fn pswap_note_order_id_equals_serial_1() {
     assert_eq!(Felt::from(pswap.order_id()), pswap.serial_number()[1]);
 }
 
+/// `PswapNote::build` rejects a zero requested amount (which would otherwise divide by zero
+/// in `calculate_output_amount`).
+#[test]
+fn pswap_builder_rejects_zero_requested_amount() {
+    let creator_id = dummy_creator_id();
+    let offered_asset = FungibleAsset::new(dummy_faucet_id(0xaa), 100).unwrap();
+    let requested_asset = FungibleAsset::new(dummy_faucet_id(0xbb), 0).unwrap();
+    let mut rng = RandomCoin::new(Word::default());
+    let storage = PswapNoteStorage::builder()
+        .requested_asset(requested_asset)
+        .creator_account_id(creator_id)
+        .build();
+    let result = PswapNote::builder()
+        .sender(creator_id)
+        .storage(storage)
+        .serial_number(rng.draw_word())
+        .note_type(NoteType::Public)
+        .offered_asset(offered_asset)
+        .build();
+    assert!(result.is_err(), "zero requested amount must be rejected");
+}
+
+/// `PswapNote::build` rejects a zero offered amount (the note would pay out nothing on any
+/// fill, which is never economically useful).
+#[test]
+fn pswap_builder_rejects_zero_offered_amount() {
+    let creator_id = dummy_creator_id();
+    let offered_asset = FungibleAsset::new(dummy_faucet_id(0xaa), 0).unwrap();
+    let requested_asset = FungibleAsset::new(dummy_faucet_id(0xbb), 50).unwrap();
+    let mut rng = RandomCoin::new(Word::default());
+    let storage = PswapNoteStorage::builder()
+        .requested_asset(requested_asset)
+        .creator_account_id(creator_id)
+        .build();
+    let result = PswapNote::builder()
+        .sender(creator_id)
+        .storage(storage)
+        .serial_number(rng.draw_word())
+        .note_type(NoteType::Public)
+        .offered_asset(offered_asset)
+        .build();
+    assert!(result.is_err(), "zero offered amount must be rejected");
+}
+
 /// `PswapNoteStorage::requested_asset_id` exposes the faucet ID as a 2-felt [`AssetId`].
 #[test]
 fn requested_asset_id_packs_faucet_id() {

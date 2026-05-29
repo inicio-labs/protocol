@@ -131,6 +131,19 @@ where
             ));
         }
 
+        // Reject zero-amount assets: an offered amount of 0 means the note pays out nothing on
+        // any fill (useless), and a requested amount of 0 would divide by zero in
+        // `calculate_output_amount`. Catching both here makes the type unconditionally safe
+        // for all callers of `execute` / `calculate_offered_for_requested`, including the
+        // `TryFrom<&Note>` reconstruction path which funnels through this builder.
+        if note.offered_asset.amount() == AssetAmount::ZERO
+            || note.storage.requested_asset_amount() == AssetAmount::ZERO
+        {
+            return Err(NoteError::other(
+                "PSWAP offered and requested amounts must be non-zero",
+            ));
+        }
+
         Ok(note)
     }
 }
