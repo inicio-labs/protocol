@@ -192,8 +192,8 @@ fn pswap_execute_combined_account_fill_and_note_fill_partial_fill() {
     let (pswap, _) = build_pswap_note(offered_asset, requested_asset, creator_id);
 
     // Account fill = 10, note fill = 20 → total fill = 30 (< 50, so partial).
-    let account_fill = FungibleAsset::new(requested_faucet, 10).unwrap();
-    let note_fill = FungibleAsset::new(requested_faucet, 20).unwrap();
+    let account_fill = AssetAmount::new(10).unwrap();
+    let note_fill = AssetAmount::new(20).unwrap();
 
     let (payback, remainder) =
         pswap.execute(consumer_id, Some(account_fill), Some(note_fill)).unwrap();
@@ -230,8 +230,8 @@ fn pswap_execute_combined_account_fill_and_note_fill_full_fill() {
     let (pswap, _) = build_pswap_note(offered_asset, requested_asset, creator_id);
 
     // Account fill = 30, note fill = 20 → total fill = 50 (exactly requested).
-    let account_fill = FungibleAsset::new(requested_faucet, 30).unwrap();
-    let note_fill = FungibleAsset::new(requested_faucet, 20).unwrap();
+    let account_fill = AssetAmount::new(30).unwrap();
+    let note_fill = AssetAmount::new(20).unwrap();
 
     let (payback, remainder) =
         pswap.execute(consumer_id, Some(account_fill), Some(note_fill)).unwrap();
@@ -270,9 +270,7 @@ fn pswap_output_assets_preserve_callback_flag() {
     let (pswap, _) = build_pswap_note(offered_asset, requested_asset, creator_id);
 
     // --- execute() (partial fill) ---
-    let account_fill = FungibleAsset::new(requested_faucet, 20)
-        .unwrap()
-        .with_callbacks(AssetCallbackFlag::Enabled);
+    let account_fill = AssetAmount::new(20).unwrap();
     let (payback, remainder) = pswap.execute(consumer_id, Some(account_fill), None).unwrap();
 
     let Asset::Fungible(fa) = payback.assets().iter().next().unwrap() else {
@@ -591,30 +589,6 @@ fn pswap_builder_rejects_zero_offered_amount() {
         .offered_asset(offered_asset)
         .build();
     assert!(result.is_err(), "zero offered amount must be rejected");
-}
-
-/// `PswapNote::execute` rejects a single fill asset whose faucet differs from the requested
-/// faucet (the previously-uncovered single-source path that bypassed `FungibleAsset::add`'s
-/// own faucet check).
-#[test]
-fn pswap_execute_rejects_fill_asset_of_wrong_faucet() {
-    let creator_id = dummy_creator_id();
-    let consumer_id = dummy_consumer_id();
-    let offered_faucet = dummy_faucet_id(0xaa);
-    let requested_faucet = dummy_faucet_id(0xbb);
-    let wrong_faucet = dummy_faucet_id(0xcc);
-
-    let offered_asset = FungibleAsset::new(offered_faucet, 100).unwrap();
-    let requested_asset = FungibleAsset::new(requested_faucet, 50).unwrap();
-    let (pswap, _) = build_pswap_note(offered_asset, requested_asset, creator_id);
-
-    // Wrong-faucet account fill asset (single source: would have skipped `add`'s check).
-    let bad_account_fill = FungibleAsset::new(wrong_faucet, 10).unwrap();
-    assert!(pswap.execute(consumer_id, Some(bad_account_fill), None).is_err());
-
-    // Wrong-faucet note fill asset (single source on the other arm).
-    let bad_note_fill = FungibleAsset::new(wrong_faucet, 10).unwrap();
-    assert!(pswap.execute(consumer_id, None, Some(bad_note_fill)).is_err());
 }
 
 /// `PswapNoteStorage::requested_asset_id` exposes the faucet ID as a 2-felt [`AssetId`].

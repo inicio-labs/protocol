@@ -183,7 +183,7 @@ async fn pswap_note_alice_reconstructs_and_consumes_p2id(
     );
 
     let (p2id_note, remainder_pswap) =
-        pswap.execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), fill_amount)?), None)?;
+        pswap.execute(bob.id(), Some(AssetAmount::new(fill_amount)?), None)?;
 
     let mut expected_output_notes = vec![RawOutputNote::Full(p2id_note.clone())];
     let predicted_remainder = if is_partial {
@@ -352,7 +352,7 @@ async fn pswap_attachment_layout_matches_masm_test() -> anyhow::Result<()> {
         PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO),
     );
 
-    let (p2id_note, remainder_pswap) = pswap.execute(bob.id(), Some(eth_20), None)?;
+    let (p2id_note, remainder_pswap) = pswap.execute(bob.id(), Some(eth_20.amount()), None)?;
     let remainder_note =
         Note::from(remainder_pswap.expect("partial fill should produce remainder"));
 
@@ -513,7 +513,7 @@ async fn pswap_fill_test(
         let p2id = pswap.execute_full_fill(consumer_id)?;
         (p2id, None)
     } else {
-        pswap.execute(consumer_id, Some(fill_asset), None)?
+        pswap.execute(consumer_id, Some(fill_asset.amount()), None)?
     };
 
     let is_partial = fill_amount < requested_total;
@@ -625,8 +625,8 @@ async fn pswap_note_note_fill_cross_swap_test() -> anyhow::Result<()> {
     );
 
     // Expected P2ID notes
-    let (alice_p2id_note, _) = alice_pswap.execute(charlie.id(), None, Some(eth_25))?;
-    let (bob_p2id_note, _) = bob_pswap.execute(charlie.id(), None, Some(usdc_50))?;
+    let (alice_p2id_note, _) = alice_pswap.execute(charlie.id(), None, Some(eth_25.amount()))?;
+    let (bob_p2id_note, _) = bob_pswap.execute(charlie.id(), None, Some(usdc_50.amount()))?;
 
     let tx_context = mock_chain
         .build_tx_context(charlie.id(), &[alice_pswap_note.id(), bob_pswap_note.id()], &[])?
@@ -732,15 +732,18 @@ async fn pswap_note_combined_account_fill_and_note_fill_test() -> anyhow::Result
         PswapNote::create_args(AssetAmount::ZERO, AssetAmount::new(60)?),
     );
 
-    let (alice_p2id_note, alice_remainder) =
-        alice_pswap.execute(charlie.id(), Some(account_fill_eth), Some(note_fill_eth))?;
+    let (alice_p2id_note, alice_remainder) = alice_pswap.execute(
+        charlie.id(),
+        Some(account_fill_eth.amount()),
+        Some(note_fill_eth.amount()),
+    )?;
     assert!(
         alice_remainder.is_none(),
         "combined fill hits full fill — no remainder expected"
     );
 
     let (bob_p2id_note, bob_remainder) =
-        bob_pswap.execute(charlie.id(), None, Some(bob_requested))?;
+        bob_pswap.execute(charlie.id(), None, Some(bob_requested.amount()))?;
     assert!(bob_remainder.is_none(), "bob pswap is filled completely via note_fill");
 
     let tx_context = mock_chain
@@ -1090,8 +1093,7 @@ async fn pswap_note_idx_nonzero_regression_test() -> anyhow::Result<()> {
         PswapNote::create_args(AssetAmount::new(25)?, AssetAmount::ZERO),
     );
 
-    let (expected_p2id, _) =
-        pswap.execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), 25)?), None)?;
+    let (expected_p2id, _) = pswap.execute(bob.id(), Some(AssetAmount::new(25)?), None)?;
 
     // Consume spawn first so the PSWAP-created P2ID gets note_idx == 1.
     let tx_context = mock_chain
@@ -1183,7 +1185,7 @@ async fn pswap_multiple_partial_fills_test(#[case] fill_amount: u64) -> anyhow::
     let payout_amount =
         pswap.calculate_offered_for_requested(AssetAmount::new(fill_amount)?)?.as_u64();
     let (p2id_note, remainder_pswap) =
-        pswap.execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), fill_amount)?), None)?;
+        pswap.execute(bob.id(), Some(AssetAmount::new(fill_amount)?), None)?;
 
     let mut expected_notes = vec![RawOutputNote::Full(p2id_note)];
     if let Some(remainder) = remainder_pswap {
@@ -1261,7 +1263,7 @@ async fn run_partial_fill_ratio_case(
     assert!(payout_amount <= offered_usdc, "payout_amount > offered");
 
     let (p2id_note, remainder_pswap) =
-        pswap.execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), fill_eth)?), None)?;
+        pswap.execute(bob.id(), Some(AssetAmount::new(fill_eth)?), None)?;
 
     let mut expected_notes = vec![RawOutputNote::Full(p2id_note)];
     if remaining_requested > 0 {
@@ -1443,11 +1445,8 @@ async fn pswap_chained_partial_fills_test(
         let payout_amount =
             pswap.calculate_offered_for_requested(AssetAmount::new(*fill_amount)?)?.as_u64();
         let remaining_offered = current_offered - payout_amount;
-        let (p2id_note, remainder_pswap) = pswap.execute(
-            bob.id(),
-            Some(FungibleAsset::new(eth_faucet.id(), *fill_amount)?),
-            None,
-        )?;
+        let (p2id_note, remainder_pswap) =
+            pswap.execute(bob.id(), Some(AssetAmount::new(*fill_amount)?), None)?;
 
         let mut expected_notes = vec![RawOutputNote::Full(p2id_note)];
         if remaining_requested > 0 {
@@ -1557,9 +1556,8 @@ fn compare_pswap_create_output_notes_vs_test_helper() {
     assert_eq!(pswap.storage().creator_account_id(), alice.id(), "Creator ID mismatch");
 
     // Full fill: should produce P2ID note, no remainder
-    let (p2id_note, remainder) = pswap
-        .execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), 25).unwrap()), None)
-        .unwrap();
+    let (p2id_note, remainder) =
+        pswap.execute(bob.id(), Some(AssetAmount::new(25).unwrap()), None).unwrap();
     assert!(remainder.is_none(), "Full fill should not produce remainder");
 
     // Verify P2ID note properties
@@ -1572,9 +1570,8 @@ fn compare_pswap_create_output_notes_vs_test_helper() {
     );
 
     // Partial fill: should produce P2ID note + remainder
-    let (p2id_partial, remainder_partial) = pswap
-        .execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), 10).unwrap()), None)
-        .unwrap();
+    let (p2id_partial, remainder_partial) =
+        pswap.execute(bob.id(), Some(AssetAmount::new(10).unwrap()), None).unwrap();
     let remainder_pswap = remainder_partial.expect("Partial fill should produce remainder");
 
     assert_eq!(p2id_partial.assets().num_assets(), 1);
@@ -1660,8 +1657,7 @@ fn pswap_remainder_carries_pswap_scheme() -> anyhow::Result<()> {
         NoteType::Public,
     )?;
 
-    let account_fill = FungibleAsset::new(eth_faucet.id(), 10)?;
-    let (_, remainder_pswap) = pswap.execute(bob.id(), Some(account_fill), None)?;
+    let (_, remainder_pswap) = pswap.execute(bob.id(), Some(AssetAmount::new(10)?), None)?;
     let remainder_pswap = remainder_pswap.expect("partial fill should produce a remainder");
 
     let att = remainder_pswap.attachments().expect("remainder must carry an attachment");
@@ -1744,11 +1740,8 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
         let remaining_offered = current_offered - payout_amount;
         let remaining_requested = current_requested - fill_amount;
 
-        let (predicted_payback_note, predicted_remainder_pswap) = current_pswap.execute(
-            bob.id(),
-            Some(FungibleAsset::new(eth_faucet.id(), fill_amount)?),
-            None,
-        )?;
+        let (predicted_payback_note, predicted_remainder_pswap) =
+            current_pswap.execute(bob.id(), Some(AssetAmount::new(fill_amount)?), None)?;
 
         let mut expected_notes = vec![RawOutputNote::Full(predicted_payback_note.clone())];
         let next_pswap_opt = if remaining_requested > 0 {
@@ -1925,9 +1918,9 @@ async fn pswap_disambiguates_multiple_creator_pswaps_in_same_tx() -> anyhow::Res
     );
 
     let (payback_a, remainder_a) =
-        pswap_a.execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), fill_each)?), None)?;
+        pswap_a.execute(bob.id(), Some(AssetAmount::new(fill_each)?), None)?;
     let (payback_b, remainder_b) =
-        pswap_b.execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), fill_each)?), None)?;
+        pswap_b.execute(bob.id(), Some(AssetAmount::new(fill_each)?), None)?;
     let remainder_a_note = Note::from(remainder_a.expect("partial fill A produces remainder"));
     let remainder_b_note = Note::from(remainder_b.expect("partial fill B produces remainder"));
 

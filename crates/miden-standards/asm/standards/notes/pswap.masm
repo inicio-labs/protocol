@@ -527,11 +527,9 @@ proc get_current_depth
 
         loc_load.PARENT_ATTACHMENT_DEPTH_OFFSET
         # => [parent_depth]
-
-        # Manual hi==0 check rather than u32assert.err=... because the VM wraps u32assert's
-        # message at runtime, which would defeat exact-match assertions on the named error.
         dup u32split drop
         # => [hi, parent_depth]
+
         assertz.err=ERR_PSWAP_ATTACHMENT_DEPTH_NOT_U32
         # => [parent_depth]
     else

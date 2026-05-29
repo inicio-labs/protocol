@@ -270,9 +270,9 @@ impl PswapNote {
 
     /// Executes the swap, producing the output notes for a given fill.
     ///
-    /// `account_fill_asset` is debited from the consumer's vault; `note_fill_asset` arrives
-    /// from another note in the same transaction (cross-swap). At least one must be
-    /// provided.
+    /// `account_fill` is debited from the consumer's vault; `note_fill` arrives from another
+    /// note in the same transaction (cross-swap). At least one must be provided. Both are
+    /// amounts of the requested asset; the faucet is implicit (the PSWAP's requested faucet).
     ///
     /// Returns `(payback_note, Option<remainder_pswap_note>)`. The remainder is
     /// `None` when the fill equals the total requested amount (full fill).
@@ -280,42 +280,26 @@ impl PswapNote {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - Both assets are `None`.
-    /// - Either fill asset's faucet does not match the requested faucet.
-    /// - The fill amount is zero.
-    /// - The fill amount exceeds the total requested amount.
+    /// - Both fills are `None`.
+    /// - The combined fill amount is zero.
+    /// - The combined fill amount exceeds the total requested amount.
     pub fn execute(
         &self,
         consumer_account_id: AccountId,
-        account_fill_asset: Option<FungibleAsset>,
-        note_fill_asset: Option<FungibleAsset>,
+        account_fill: Option<AssetAmount>,
+        note_fill: Option<AssetAmount>,
     ) -> Result<(Note, Option<PswapNote>), NoteError> {
-        // Reject fill assets of the wrong faucet (the single-source arms below bypass
-        // `FungibleAsset::add`, which is the only place a mismatch would otherwise be caught).
-        let requested_faucet_id = self.storage.requested_faucet_id();
-        let wrong_faucet = |asset: &Option<FungibleAsset>| -> bool {
-            asset.is_some_and(|a| a.faucet_id() != requested_faucet_id)
-        };
-        if wrong_faucet(&account_fill_asset) || wrong_faucet(&note_fill_asset) {
-            return Err(NoteError::other("fill asset faucet does not match the requested faucet"));
-        }
-
-        // Combine account fill and note fill into a single payback asset.
-        let payback_asset = match (account_fill_asset, note_fill_asset) {
-            (Some(account_fill), Some(note_fill)) => account_fill.add(note_fill).map_err(|e| {
-                NoteError::other_with_source(
-                    "failed to combine account fill and note fill assets",
-                    e,
-                )
-            })?,
-            (Some(asset), None) | (None, Some(asset)) => asset,
+        let account_fill_amount = account_fill.unwrap_or(AssetAmount::ZERO);
+        let note_fill_amount = note_fill.unwrap_or(AssetAmount::ZERO);
+        let fill_amount = match (account_fill, note_fill) {
             (None, None) => {
                 return Err(NoteError::other(
-                    "at least one of account_fill_asset or note_fill_asset must be provided",
+                    "at least one of account_fill or note_fill must be provided",
                 ));
             },
+            _ => (account_fill_amount + note_fill_amount)
+                .map_err(|e| NoteError::other_with_source("fill sum overflows max amount", e))?,
         };
-        let fill_amount = payback_asset.amount();
 
         let total_offered_amount = self.offered_asset.amount();
         let requested_faucet_id = self.storage.requested_faucet_id();
@@ -332,10 +316,8 @@ impl PswapNote {
             )));
         }
 
-        // Mirror the MASM, which computes payouts separately for the account and note halves
-        // (the account half flows to the consumer, the sum drives the remainder's offered).
-        let account_fill_amount = account_fill_asset.map_or(AssetAmount::ZERO, |a| a.amount());
-        let note_fill_amount = note_fill_asset.map_or(AssetAmount::ZERO, |a| a.amount());
+        // Compute payouts separately for the account and note halves: the account portion flows
+        // to the consumer's vault, and the sum drives the remainder's offered amount.
         let payout_for_account_fill = Self::calculate_output_amount(
             total_offered_amount,
             total_requested_amount,
@@ -349,6 +331,9 @@ impl PswapNote {
         let offered_amount_for_fill = (payout_for_account_fill + payout_for_note_fill)
             .map_err(|e| NoteError::other_with_source("payout sum overflows max amount", e))?;
 
+        let payback_asset = FungibleAsset::new(requested_faucet_id, fill_amount.as_u64())
+            .map_err(|e| NoteError::other_with_source("failed to build payback asset", e))?
+            .with_callbacks(self.storage.requested_asset().callbacks());
         let payback_note = self.create_payback_note(consumer_account_id, payback_asset)?;
 
         let remainder = if fill_amount < total_requested_amount {
@@ -571,9 +556,9 @@ impl PswapNote {
     ) -> Result<AssetAmount, NoteError> {
         let product = (offered_total.as_u64() as u128) * (fill_amount.as_u64() as u128);
         let quotient = product / (requested_total.as_u64() as u128);
-        let raw = u64::try_from(quotient)
+        let payout = u64::try_from(quotient)
             .map_err(|_| NoteError::other("payout quotient does not fit in u64"))?;
-        AssetAmount::new(raw).map_err(|e| {
+        AssetAmount::new(payout).map_err(|e| {
             NoteError::other_with_source("payout amount exceeds max fungible asset amount", e)
         })
     }
