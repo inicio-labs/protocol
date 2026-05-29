@@ -93,7 +93,10 @@ impl PswapNoteStorage {
     /// the requested fungible faucet's ID in that shape so callers indexing PSWAP storage by
     /// asset can pattern-match alongside other 2-felt asset identifiers.
     pub fn requested_asset_id(&self) -> AssetId {
-        AssetId::new(self.requested_asset.faucet_id().suffix(), self.requested_asset.faucet_id().prefix().as_felt())
+        AssetId::new(
+            self.requested_asset.faucet_id().suffix(),
+            self.requested_asset.faucet_id().prefix().as_felt(),
+        )
     }
 
     /// Returns the requested token amount.

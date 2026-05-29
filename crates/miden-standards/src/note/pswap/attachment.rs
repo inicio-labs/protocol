@@ -84,6 +84,10 @@ impl TryFrom<&NoteAttachment> for PswapNoteAttachment {
         let depth = NonZeroU32::new(depth_u32)
             .ok_or_else(|| NoteError::other("PSWAP attachment depth must be non-zero"))?;
 
-        Ok(Self { amount, order_id: OrderId::from(word[1]), depth })
+        Ok(Self {
+            amount,
+            order_id: OrderId::from(word[1]),
+            depth,
+        })
     }
 }

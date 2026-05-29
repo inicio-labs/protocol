@@ -345,7 +345,10 @@ async fn pswap_attachment_layout_matches_masm_test() -> anyhow::Result<()> {
     let expected_depth = 1u64; // first fill of an original PSWAP
 
     let mut note_args_map = BTreeMap::new();
-    note_args_map.insert(pswap_note.id(), PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO));
+    note_args_map.insert(
+        pswap_note.id(),
+        PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO),
+    );
 
     let (p2id_note, remainder_pswap) = pswap.execute(bob.id(), Some(eth_20), None)?;
     let remainder_note =
@@ -525,7 +528,10 @@ async fn pswap_fill_test(
 
     if !use_network_account {
         let mut note_args_map = BTreeMap::new();
-        note_args_map.insert(pswap_note.id(), PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO));
+        note_args_map.insert(
+            pswap_note.id(),
+            PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO),
+        );
         tx_builder = tx_builder.extend_note_args(note_args_map);
     }
 
@@ -1166,7 +1172,10 @@ async fn pswap_multiple_partial_fills_test(#[case] fill_amount: u64) -> anyhow::
     let mock_chain = builder.build()?;
 
     let mut note_args_map = BTreeMap::new();
-    note_args_map.insert(pswap_note.id(), PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO));
+    note_args_map.insert(
+        pswap_note.id(),
+        PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO),
+    );
 
     let payout_amount = pswap.calculate_offered_for_requested(fill_amount)?;
     let (p2id_note, remainder_pswap) =
@@ -1744,7 +1753,10 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
         };
 
         let mut note_args_map = BTreeMap::new();
-        note_args_map.insert(current_pswap_note.id(), PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO));
+        note_args_map.insert(
+            current_pswap_note.id(),
+            PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO),
+        );
 
         let bob_tx = mock_chain
             .build_tx_context(bob.id(), &[current_pswap_note.id()], &[])?
@@ -1782,8 +1794,7 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
         // --- Alice reconstructs the remainder (when partial) from on-chain data alone ---
         if next_pswap_opt.is_some() {
             let on_chain_remainder = bob_tx.output_notes().get_note(1);
-            let on_chain_remainder_att =
-                first_pswap_attachment(on_chain_remainder.attachments());
+            let on_chain_remainder_att = first_pswap_attachment(on_chain_remainder.attachments());
 
             let remainder_attachment = PswapNoteAttachment::new(
                 on_chain_remainder_att.amount(),
@@ -1896,8 +1907,14 @@ async fn pswap_disambiguates_multiple_creator_pswaps_in_same_tx() -> anyhow::Res
     // Bob partially fills BOTH PSWAPs in the same tx — 10 ETH from each.
     let fill_each = 10u64;
     let mut note_args = BTreeMap::new();
-    note_args.insert(note_a.id(), PswapNote::create_args(AssetAmount::new(fill_each)?, AssetAmount::ZERO));
-    note_args.insert(note_b.id(), PswapNote::create_args(AssetAmount::new(fill_each)?, AssetAmount::ZERO));
+    note_args.insert(
+        note_a.id(),
+        PswapNote::create_args(AssetAmount::new(fill_each)?, AssetAmount::ZERO),
+    );
+    note_args.insert(
+        note_b.id(),
+        PswapNote::create_args(AssetAmount::new(fill_each)?, AssetAmount::ZERO),
+    );
 
     let (payback_a, remainder_a) =
         pswap_a.execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), fill_each)?), None)?;

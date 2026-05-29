@@ -139,9 +139,7 @@ where
         if note.offered_asset.amount() == AssetAmount::ZERO
             || note.storage.requested_asset_amount() == AssetAmount::ZERO
         {
-            return Err(NoteError::other(
-                "PSWAP offered and requested amounts must be non-zero",
-            ));
+            return Err(NoteError::other("PSWAP offered and requested amounts must be non-zero"));
         }
 
         Ok(note)
@@ -181,8 +179,8 @@ impl PswapNote {
     ///
     /// - `account_fill` is the portion of the requested asset the consumer pays out of their own
     ///   vault.
-    /// - `note_fill` is the portion sourced from another note in the same transaction (cross-swap
-    ///   / net-zero flow).
+    /// - `note_fill` is the portion sourced from another note in the same transaction (cross-swap /
+    ///   net-zero flow).
     ///
     /// Both values are in the requested asset's base units. In a network transaction the kernel
     /// defaults `NOTE_ARGS` to `[0, 0, 0, 0]` and the script falls back to a full fill, so this
@@ -278,10 +276,9 @@ impl PswapNote {
         let requested_faucet_id = self.storage.requested_faucet_id();
         let total_requested_amount = self.storage.requested_asset_amount();
 
-        let fill_asset =
-            FungibleAsset::new(requested_faucet_id, total_requested_amount.as_u64())
-                .map_err(|e| NoteError::other_with_source("failed to create full fill asset", e))?
-                .with_callbacks(self.storage.requested_asset().callbacks());
+        let fill_asset = FungibleAsset::new(requested_faucet_id, total_requested_amount.as_u64())
+            .map_err(|e| NoteError::other_with_source("failed to create full fill asset", e))?
+            .with_callbacks(self.storage.requested_asset().callbacks());
 
         self.create_payback_note(consumer_account_id, fill_asset, total_requested_amount.as_u64())
     }
@@ -600,7 +597,6 @@ impl PswapNote {
         })?;
         Ok(amount)
     }
-
 
     /// Builds a payback note (P2ID) that delivers the filled assets to the swap creator.
     ///

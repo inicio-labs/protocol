@@ -105,11 +105,7 @@ fn pswap_tag() {
     )
     .unwrap();
     let requested_asset = FungibleAsset::new(
-        AccountId::dummy(
-            requested_faucet_bytes,
-            AccountIdVersion::Version1,
-            AccountType::Public,
-        ),
+        AccountId::dummy(requested_faucet_bytes, AccountIdVersion::Version1, AccountType::Public),
         200,
     )
     .unwrap();
@@ -415,8 +411,7 @@ fn parent_depth_zero_on_out_of_range_attachment() {
     // Stamp a raw word with a depth exceeding u32::MAX.
     let oversized_depth = Felt::try_from(u64::from(u32::MAX) + 1).unwrap();
     let word = Word::from([Felt::from(1u32), Felt::from(1u32), oversized_depth, ZERO]);
-    let raw_attachment =
-        NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, word);
+    let raw_attachment = NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, word);
     let pswap = PswapNote::builder()
         .sender(creator_id)
         .storage(storage)
@@ -434,7 +429,10 @@ fn parent_depth_zero_on_out_of_range_attachment() {
 fn try_from_rejects_wrong_scheme() {
     let word = Word::from([Felt::from(1u32), Felt::from(2u32), Felt::from(1u32), ZERO]);
     // Use NetworkAccountTarget (scheme = 2) instead of PSWAP_ATTACHMENT_SCHEME (3).
-    let other = NoteAttachment::with_word(StandardNoteAttachment::NetworkAccountTarget.attachment_scheme(), word);
+    let other = NoteAttachment::with_word(
+        StandardNoteAttachment::NetworkAccountTarget.attachment_scheme(),
+        word,
+    );
     assert!(PswapNoteAttachment::try_from(&other).is_err());
 }
 
