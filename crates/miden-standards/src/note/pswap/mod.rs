@@ -668,6 +668,10 @@ impl PswapNote {
 // CONVERSIONS
 // ================================================================================================
 
+/// Compile-time proof that a single-asset list always fits within the protocol's
+/// per-note asset cap, so the `NoteAssets::new` call below is unreachable on its error path.
+const _: () = assert!(1 <= NoteAssets::MAX_NUM_ASSETS);
+
 /// Converts a [`PswapNote`] into a protocol [`Note`], computing the final PSWAP tag.
 impl From<PswapNote> for Note {
     fn from(pswap: PswapNote) -> Self {
@@ -679,8 +683,10 @@ impl From<PswapNote> for Note {
 
         let recipient = pswap.storage.into_recipient(pswap.serial_number);
 
-        let assets = NoteAssets::new(vec![pswap.offered_asset.into()])
-            .expect("single fungible asset should be valid");
+        // Unreachable per the `const _: () = assert!` above (single-element vec, so the
+        // duplicate-detection loop never iterates).
+        let assets =
+            NoteAssets::new(vec![pswap.offered_asset.into()]).unwrap_or_else(|_| unreachable!());
 
         let metadata = PartialNoteMetadata::new(pswap.sender, pswap.note_type).with_tag(tag);
 
