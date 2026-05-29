@@ -385,10 +385,12 @@ async fn pswap_attachment_layout_matches_masm_test() -> anyhow::Result<()> {
         "remainder must use PSWAP_ATTACHMENT_SCHEME",
     );
 
+    let order_id_felt = Felt::from(order_id);
+
     // P2ID payback attachment word: [fill_amount, order_id, depth, 0].
     let expected_p2id_word = Word::from([
         Felt::try_from(fill_amount).expect("fill_amount fits in a felt"),
-        order_id,
+        order_id_felt,
         Felt::try_from(expected_depth).expect("depth fits in a felt"),
         ZERO,
     ]);
@@ -401,7 +403,7 @@ async fn pswap_attachment_layout_matches_masm_test() -> anyhow::Result<()> {
     // Remainder PSWAP attachment word: [amt_payout, order_id, depth, 0].
     let expected_remainder_word = Word::from([
         Felt::try_from(expected_payout).expect("amt_payout fits in a felt"),
-        order_id,
+        order_id_felt,
         Felt::try_from(expected_depth).expect("depth fits in a felt"),
         ZERO,
     ]);
@@ -425,7 +427,7 @@ async fn pswap_attachment_layout_matches_masm_test() -> anyhow::Result<()> {
     );
 
     // Sanity: order_id must equal the original PSWAP's serial[1].
-    assert_eq!(order_id, pswap.serial_number()[1], "order_id should equal serial[1]");
+    assert_eq!(order_id_felt, pswap.serial_number()[1], "order_id should equal serial[1]");
 
     Ok(())
 }
