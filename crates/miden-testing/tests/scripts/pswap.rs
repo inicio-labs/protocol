@@ -244,7 +244,9 @@ async fn pswap_note_alice_reconstructs_and_consumes_p2id(
         let remainder_pswap_att = first_pswap_attachment(output_remainder.attachments());
         let amt_payout_from_attachment = remainder_pswap_att.amount().as_u64();
 
-        let expected_payout = pswap.calculate_offered_for_requested(fill_amount_from_aux)?;
+        let expected_payout = pswap
+            .calculate_offered_for_requested(AssetAmount::new(fill_amount_from_aux)?)?
+            .as_u64();
         assert_eq!(
             amt_payout_from_attachment, expected_payout,
             "remainder aux should carry amt_payout matching the Rust-side calc",
@@ -515,7 +517,8 @@ async fn pswap_fill_test(
     };
 
     let is_partial = fill_amount < requested_total;
-    let payout_amount = pswap.calculate_offered_for_requested(fill_amount)?;
+    let payout_amount =
+        pswap.calculate_offered_for_requested(AssetAmount::new(fill_amount)?)?.as_u64();
 
     let mut expected_notes = vec![RawOutputNote::Full(p2id_note.clone())];
     if let Some(remainder) = remainder_pswap {
@@ -1177,7 +1180,8 @@ async fn pswap_multiple_partial_fills_test(#[case] fill_amount: u64) -> anyhow::
         PswapNote::create_args(AssetAmount::new(fill_amount)?, AssetAmount::ZERO),
     );
 
-    let payout_amount = pswap.calculate_offered_for_requested(fill_amount)?;
+    let payout_amount =
+        pswap.calculate_offered_for_requested(AssetAmount::new(fill_amount)?)?.as_u64();
     let (p2id_note, remainder_pswap) =
         pswap.execute(bob.id(), Some(FungibleAsset::new(eth_faucet.id(), fill_amount)?), None)?;
 
@@ -1249,7 +1253,8 @@ async fn run_partial_fill_ratio_case(
         PswapNote::create_args(AssetAmount::new(fill_eth)?, AssetAmount::ZERO),
     );
 
-    let payout_amount = pswap.calculate_offered_for_requested(fill_eth)?;
+    let payout_amount =
+        pswap.calculate_offered_for_requested(AssetAmount::new(fill_eth)?)?.as_u64();
     let remaining_offered = offered_usdc - payout_amount;
 
     assert!(payout_amount > 0, "payout_amount must be > 0");
@@ -1435,7 +1440,8 @@ async fn pswap_chained_partial_fills_test(
             PswapNote::create_args(AssetAmount::new(*fill_amount)?, AssetAmount::ZERO),
         );
 
-        let payout_amount = pswap.calculate_offered_for_requested(*fill_amount)?;
+        let payout_amount =
+            pswap.calculate_offered_for_requested(AssetAmount::new(*fill_amount)?)?.as_u64();
         let remaining_offered = current_offered - payout_amount;
         let (p2id_note, remainder_pswap) = pswap.execute(
             bob.id(),
@@ -1732,7 +1738,9 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
         let depth = NonZeroU32::new((idx + 1) as u32).expect("idx + 1 is always >= 1");
 
         // --- Bob fills the current PSWAP ---
-        let payout_amount = current_pswap.calculate_offered_for_requested(fill_amount)?;
+        let payout_amount = current_pswap
+            .calculate_offered_for_requested(AssetAmount::new(fill_amount)?)?
+            .as_u64();
         let remaining_offered = current_offered - payout_amount;
         let remaining_requested = current_requested - fill_amount;
 

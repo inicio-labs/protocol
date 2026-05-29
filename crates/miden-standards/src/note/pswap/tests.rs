@@ -1,5 +1,5 @@
 use miden_protocol::account::{AccountId, AccountIdVersion, AccountType};
-use miden_protocol::asset::{AssetCallbackFlag, AssetId, FungibleAsset};
+use miden_protocol::asset::{Asset, AssetCallbackFlag, AssetId, FungibleAsset};
 use miden_protocol::crypto::rand::{FeltRng, RandomCoin};
 use miden_protocol::note::NoteStorage;
 
@@ -120,13 +120,22 @@ fn pswap_tag() {
 
 #[test]
 fn calculate_output_amount() {
-    assert_eq!(PswapNote::calculate_output_amount(100, 100, 50).unwrap(), 50); // Equal ratio
-    assert_eq!(PswapNote::calculate_output_amount(200, 100, 50).unwrap(), 100); // 2:1 ratio
-    assert_eq!(PswapNote::calculate_output_amount(100, 200, 50).unwrap(), 25); // 1:2 ratio
+    let amt = |x| AssetAmount::new(x).unwrap();
+    assert_eq!(
+        PswapNote::calculate_output_amount(amt(100), amt(100), amt(50)).unwrap(),
+        amt(50)
+    ); // Equal ratio
+    assert_eq!(
+        PswapNote::calculate_output_amount(amt(200), amt(100), amt(50)).unwrap(),
+        amt(100)
+    ); // 2:1 ratio
+    assert_eq!(
+        PswapNote::calculate_output_amount(amt(100), amt(200), amt(50)).unwrap(),
+        amt(25)
+    ); // 1:2 ratio
 
-    // Non-integer ratio (100/73)
-    let result = PswapNote::calculate_output_amount(100, 73, 7).unwrap();
-    assert!(result > 0, "Should produce non-zero output");
+    // Non-integer ratio: floor(100 * 7 / 73) = floor(9.589) = 9
+    assert_eq!(PswapNote::calculate_output_amount(amt(100), amt(73), amt(7)).unwrap(), amt(9));
 }
 
 #[test]
@@ -470,6 +479,14 @@ fn try_from_rejects_wrong_num_words() {
     let words = vec![Word::default(), Word::default()];
     let multi = NoteAttachment::with_words(PswapNote::PSWAP_ATTACHMENT_SCHEME, words).unwrap();
     assert!(PswapNoteAttachment::try_from(&multi).is_err());
+}
+
+/// `TryFrom<&NoteAttachment>` rejects an attachment whose reserved slot (word[3]) is non-zero.
+#[test]
+fn try_from_rejects_non_zero_reserved_slot() {
+    let word = Word::from([Felt::from(1u32), Felt::from(2u32), Felt::from(1u32), Felt::from(9u32)]);
+    let att = NoteAttachment::with_word(PswapNote::PSWAP_ATTACHMENT_SCHEME, word);
+    assert!(PswapNoteAttachment::try_from(&att).is_err());
 }
 
 /// `TryFrom<&NoteAttachment>` round-trips a valid attachment.

@@ -4,7 +4,7 @@ use miden_protocol::account::AccountId;
 use miden_protocol::asset::{AssetAmount, AssetCallbackFlag, AssetId, FungibleAsset};
 use miden_protocol::errors::NoteError;
 use miden_protocol::note::{NoteRecipient, NoteStorage, NoteTag, NoteType};
-use miden_protocol::{Felt, Word};
+use miden_protocol::{Felt, MAX_NOTE_STORAGE_ITEMS, Word};
 
 use super::PswapNote;
 
@@ -22,8 +22,7 @@ use super::PswapNote;
 /// | `[5-6]` | Creator account ID (prefix, suffix) |
 ///
 /// Slots `[1, 2]` together form a 2-element [`AssetId`] view of the faucet (see
-/// [`Self::requested_asset_id`]). The on-chain layout is unchanged - the typed accessor is a
-/// Rust-side convenience.
+/// [`Self::requested_asset_id`]).
 ///
 /// The payback note tag is derived at runtime from the creator account ID
 /// (via `note_tag::create_account_target` in MASM) rather than stored.
@@ -39,9 +38,7 @@ pub struct PswapNoteStorage {
 
     /// Note type of the payback note produced when the pswap is filled. Defaults to
     /// [`NoteType::Private`] because the payback carries the fill asset and is typically
-    /// consumed directly by the creator - a private note is cheaper in fees and bandwidth
-    /// and offers the same information (the fill amount is already recorded in the
-    /// executed transaction's output).
+    /// consumed directly by the creator.
     #[builder(default = NoteType::Private)]
     payback_note_type: NoteType,
 }
@@ -87,11 +84,6 @@ impl PswapNoteStorage {
     }
 
     /// Returns the requested faucet's two-felt identity as an [`AssetId`].
-    ///
-    /// Note: [`AssetId`] is the protocol-level vault-key newtype carrying `(suffix, prefix)`. It
-    /// is independent of the variant ID used for non-fungible assets - this accessor exposes
-    /// the requested fungible faucet's ID in that shape so callers indexing PSWAP storage by
-    /// asset can pattern-match alongside other 2-felt asset identifiers.
     pub fn requested_asset_id(&self) -> AssetId {
         AssetId::new(
             self.requested_asset.faucet_id().suffix(),
@@ -104,6 +96,10 @@ impl PswapNoteStorage {
         self.requested_asset.amount()
     }
 }
+
+/// Compile-time proof that the PSWAP storage layout (7 items) always fits within the protocol's
+/// per-note storage cap, so the `NoteStorage::new` call below is unreachable on its error path.
+const _: () = assert!(PswapNoteStorage::NUM_STORAGE_ITEMS <= MAX_NOTE_STORAGE_ITEMS);
 
 /// Serializes [`PswapNoteStorage`] into a 7-element [`NoteStorage`].
 impl From<PswapNoteStorage> for NoteStorage {
@@ -120,8 +116,8 @@ impl From<PswapNoteStorage> for NoteStorage {
             storage.creator_account_id.prefix().as_felt(),
             storage.creator_account_id.suffix(),
         ];
-        NoteStorage::new(storage_items)
-            .expect("number of storage items should not exceed max storage items")
+        // Unreachable per the `const _: () = assert!` above.
+        NoteStorage::new(storage_items).unwrap_or_else(|_| unreachable!())
     }
 }
 

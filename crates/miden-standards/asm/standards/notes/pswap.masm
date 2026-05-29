@@ -96,7 +96,6 @@ const EXEC_AMT_REQUESTED_NOTE_FILL = 9
 # write the word at PARENT_ATTACHMENT_PTR, read back only the depth at DEPTH_OFFSET.
 const PARENT_ATTACHMENT_PTR = 0
 const PARENT_ATTACHMENT_DEPTH_OFFSET = 2
-# PswapAttachment is always exactly one word - see PSWAP_ATTACHMENT_SCHEME above.
 const PSWAP_ATTACHMENT_NUM_WORDS = 1
 
 # ERRORS
@@ -522,8 +521,6 @@ proc get_current_depth
         exec.active_note::write_attachment_to_memory
         # => [num_words]
 
-        # A PswapAttachment is exactly one word - assert before reading back from @locals(4) to
-        # rule out an attacker-crafted multi-word attachment overwriting adjacent local memory.
         eq.PSWAP_ATTACHMENT_NUM_WORDS
         assert.err=ERR_PSWAP_ATTACHMENT_WRONG_NUM_WORDS
         # => []
@@ -531,13 +528,9 @@ proc get_current_depth
         loc_load.PARENT_ATTACHMENT_DEPTH_OFFSET
         # => [parent_depth]
 
-        # Defense-in-depth: assert depth fits in u32 by checking the high 32 bits are zero. The
-        # Rust side encodes u32 depths; a larger felt indicates a forged attachment. We avoid
-        # `u32assert.err=...` because the VM wraps its message at runtime, which would defeat
-        # exact-match assertions on the named error.
-        dup u32split
-        # => [lo, hi, parent_depth]   (u32split puts lo on top)
-        drop
+        # Manual hi==0 check rather than u32assert.err=... because the VM wraps u32assert's
+        # message at runtime, which would defeat exact-match assertions on the named error.
+        dup u32split drop
         # => [hi, parent_depth]
         assertz.err=ERR_PSWAP_ATTACHMENT_DEPTH_NOT_U32
         # => [parent_depth]

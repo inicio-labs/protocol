@@ -57,10 +57,8 @@ impl From<PswapNoteAttachment> for NoteAttachment {
 /// - the scheme is [`PswapNote::PSWAP_ATTACHMENT_SCHEME`];
 /// - the content is exactly one word (`num_words == 1`);
 /// - the word's `amount` slot is a valid [`AssetAmount`];
-/// - the word's `depth` slot fits in a `u32` and is non-zero.
-///
-/// The trailing slot (`word[3]`) is not asserted to be zero: PSWAP_ATTACHMENT_SCHEME's
-/// canonical encoding leaves it for forward compatibility.
+/// - the word's `depth` slot fits in a `u32` and is non-zero;
+/// - the word's reserved slot (`word[3]`) is zero.
 impl TryFrom<&NoteAttachment> for PswapNoteAttachment {
     type Error = NoteError;
 
@@ -83,6 +81,10 @@ impl TryFrom<&NoteAttachment> for PswapNoteAttachment {
             .map_err(|_| NoteError::other("PSWAP attachment depth does not fit in u32"))?;
         let depth = NonZeroU32::new(depth_u32)
             .ok_or_else(|| NoteError::other("PSWAP attachment depth must be non-zero"))?;
+
+        if word[3] != ZERO {
+            return Err(NoteError::other("PSWAP attachment reserved slot (word[3]) must be zero"));
+        }
 
         Ok(Self {
             amount,
