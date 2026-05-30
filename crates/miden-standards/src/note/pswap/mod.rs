@@ -252,11 +252,10 @@ impl PswapNote {
 
     /// Executes the swap as a full fill, producing only the payback note (no remainder).
     ///
-    /// Equivalent to calling [`Self::execute`] with `account_fill_asset` set to the full
-    /// requested amount and `note_fill_asset = None`. It also matches the on-chain
-    /// behavior when a note is consumed without explicit `note_args` (e.g. in a network
-    /// transaction, where the kernel defaults `note_args` to `[0, 0, 0, 0]` and the MASM
-    /// script falls back to a full fill).
+    /// Equivalent to calling [`Self::execute`] with `account_fill` set to the full requested
+    /// amount and `note_fill = None`. It also matches the on-chain behavior when a note is
+    /// consumed without explicit `note_args` (the kernel defaults `note_args` to
+    /// `[0, 0, 0, 0]` and the MASM script falls back to a full fill).
     pub fn execute_full_fill(&self, consumer_account_id: AccountId) -> Result<Note, NoteError> {
         let requested_faucet_id = self.storage.requested_faucet_id();
         let total_requested_amount = self.storage.requested_asset_amount();
