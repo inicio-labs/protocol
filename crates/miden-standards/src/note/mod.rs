@@ -22,7 +22,7 @@ mod p2ide;
 pub use p2ide::{P2ideNote, P2ideNoteStorage};
 
 mod pswap;
-pub use pswap::{PswapNote, PswapNoteAttachment, PswapNoteStorage};
+pub use pswap::{OrderId, PswapNote, PswapNoteAttachment, PswapNoteStorage};
 
 mod swap;
 pub use swap::{SwapNote, SwapNoteStorage};
@@ -55,33 +55,41 @@ impl StandardNote {
 
     /// Returns a [`StandardNote`] instance based on the provided [`NoteScript`]. Returns `None`
     /// if the provided script does not match any standard note script.
-    pub fn from_script(script: &NoteScript) -> Option<Self> {
+    ///
+    /// # Errors
+    ///
+    /// Propagates the script-load error from [`PswapNote::script_root`] (build-time invariant).
+    pub fn from_script(script: &NoteScript) -> Result<Option<Self>, NoteError> {
         Self::from_script_root(script.root())
     }
 
     /// Returns a [`StandardNote`] instance based on the provided script root. Returns `None` if
     /// the provided root does not match any standard note script.
-    pub fn from_script_root(root: NoteScriptRoot) -> Option<Self> {
+    ///
+    /// # Errors
+    ///
+    /// Propagates the script-load error from [`PswapNote::script_root`] (build-time invariant).
+    pub fn from_script_root(root: NoteScriptRoot) -> Result<Option<Self>, NoteError> {
         if root == P2idNote::script_root() {
-            return Some(Self::P2ID);
+            return Ok(Some(Self::P2ID));
         }
         if root == P2ideNote::script_root() {
-            return Some(Self::P2IDE);
+            return Ok(Some(Self::P2IDE));
         }
         if root == SwapNote::script_root() {
-            return Some(Self::SWAP);
+            return Ok(Some(Self::SWAP));
         }
-        if root == PswapNote::script_root() {
-            return Some(Self::PSWAP);
+        if root == PswapNote::script_root()? {
+            return Ok(Some(Self::PSWAP));
         }
         if root == MintNote::script_root() {
-            return Some(Self::MINT);
+            return Ok(Some(Self::MINT));
         }
         if root == BurnNote::script_root() {
-            return Some(Self::BURN);
+            return Ok(Some(Self::BURN));
         }
 
-        None
+        Ok(None)
     }
 
     // PUBLIC ACCESSORS
@@ -112,27 +120,35 @@ impl StandardNote {
     }
 
     /// Returns the note script of the current [StandardNote] instance.
-    pub fn script(&self) -> NoteScript {
-        match self {
+    ///
+    /// # Errors
+    ///
+    /// Propagates the script-load error from [`PswapNote::script`] (build-time invariant).
+    pub fn script(&self) -> Result<NoteScript, NoteError> {
+        Ok(match self {
             Self::P2ID => P2idNote::script(),
             Self::P2IDE => P2ideNote::script(),
             Self::SWAP => SwapNote::script(),
-            Self::PSWAP => PswapNote::script(),
+            Self::PSWAP => PswapNote::script()?,
             Self::MINT => MintNote::script(),
             Self::BURN => BurnNote::script(),
-        }
+        })
     }
 
     /// Returns the script root of the current [StandardNote] instance.
-    pub fn script_root(&self) -> NoteScriptRoot {
-        match self {
+    ///
+    /// # Errors
+    ///
+    /// Propagates the script-load error from [`PswapNote::script_root`] (build-time invariant).
+    pub fn script_root(&self) -> Result<NoteScriptRoot, NoteError> {
+        Ok(match self {
             Self::P2ID => P2idNote::script_root(),
             Self::P2IDE => P2ideNote::script_root(),
             Self::SWAP => SwapNote::script_root(),
-            Self::PSWAP => PswapNote::script_root(),
+            Self::PSWAP => PswapNote::script_root()?,
             Self::MINT => MintNote::script_root(),
             Self::BURN => BurnNote::script_root(),
-        }
+        })
     }
 
     /// Performs the inputs check of the provided standard note against the target account and the

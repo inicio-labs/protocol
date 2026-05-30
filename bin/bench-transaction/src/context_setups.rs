@@ -474,7 +474,7 @@ pub async fn tx_consume_b2agg_note(pre_populate_leaves: Option<u32>) -> Result<T
     mock_chain.prove_next_block()?;
 
     // TX1: BUILD B2AGG NOTE TRANSACTION CONTEXT (ready to execute)
-    let burn_note_script = StandardNote::BURN.script();
+    let burn_note_script = StandardNote::BURN.script()?;
     let foreign_account_inputs = mock_chain.get_foreign_account_inputs(faucet.id())?;
     let b2agg_tx_context = mock_chain
         .build_tx_context(bridge_account.id(), &[b2agg_note.id()], &[])?

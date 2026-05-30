@@ -394,17 +394,24 @@ where
     ) -> Result<Vec<AdviceMutation>, TransactionKernelError> {
         // Resolve standard note scripts directly, avoiding a data store round-trip.
         let script_root = NoteScriptRoot::from_raw(script_root);
-        let note_script: Option<NoteScript> =
-            if let Some(standard_note) = StandardNote::from_script_root(script_root) {
-                Some(standard_note.script())
-            } else {
-                self.base_host.store().get_note_script(script_root).await.map_err(|err| {
-                    TransactionKernelError::other_with_source(
-                        "failed to retrieve note script from data store",
-                        err,
-                    )
-                })?
-            };
+        let standard_note = StandardNote::from_script_root(script_root).map_err(|err| {
+            TransactionKernelError::other_with_source("failed to resolve standard note", err)
+        })?;
+        let note_script: Option<NoteScript> = if let Some(standard_note) = standard_note {
+            Some(standard_note.script().map_err(|err| {
+                TransactionKernelError::other_with_source(
+                    "failed to load standard note script",
+                    err,
+                )
+            })?)
+        } else {
+            self.base_host.store().get_note_script(script_root).await.map_err(|err| {
+                TransactionKernelError::other_with_source(
+                    "failed to retrieve note script from data store",
+                    err,
+                )
+            })?
+        };
 
         match note_script {
             Some(note_script) => {

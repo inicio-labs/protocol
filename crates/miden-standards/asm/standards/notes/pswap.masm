@@ -96,6 +96,7 @@ const EXEC_AMT_REQUESTED_NOTE_FILL = 9
 # write the word at PARENT_ATTACHMENT_PTR, read back only the depth at DEPTH_OFFSET.
 const PARENT_ATTACHMENT_PTR = 0
 const PARENT_ATTACHMENT_DEPTH_OFFSET = 2
+const PSWAP_ATTACHMENT_NUM_WORDS = 1
 
 # ERRORS
 # =================================================================================================
@@ -106,6 +107,8 @@ const ERR_PSWAP_FILL_EXCEEDS_REQUESTED="PSWAP fill amount exceeds requested amou
 const ERR_PSWAP_FILL_SUM_OVERFLOW="PSWAP account_fill + note_fill overflows u64"
 const ERR_PSWAP_NOT_VALID_ASSET_AMOUNT="PSWAP computed amount exceeds max fungible asset amount"
 const ERR_PSWAP_PAYOUT_OVERFLOW="PSWAP payout quotient does not fit in u64"
+const ERR_PSWAP_ATTACHMENT_WRONG_NUM_WORDS="PSWAP attachment must encode exactly one word"
+const ERR_PSWAP_ATTACHMENT_DEPTH_NOT_U32="PSWAP attachment depth must fit in u32"
 
 # U64 VALIDATION
 # =================================================================================================
@@ -493,9 +496,13 @@ proc get_order_id
 end
 
 #! Returns current_depth = parent_depth + 1, where parent_depth is the depth carried in the
-#! consumed PSWAP note's PswapAttachment word at offset PARENT_ATTACHMENT_DEPTH_OFFSET if such an
-#! attachment exists, or 0 if not (i.e., the parent is the original PSWAP, with scheme none()
-#! or NetworkAccountTarget).
+#! consumed PSWAP note's PswapAttachment word at offset PARENT_ATTACHMENT_DEPTH_OFFSET if such
+#! an attachment exists, or 0 if not.
+#!
+#! The initial (depth-0) PSWAP carries no PSWAP_ATTACHMENT_SCHEME attachment; only payback P2IDs
+#! and remainder PSWAPs do. So `is_found = false` here means we are consuming the original PSWAP
+#! (or one carrying only an unrelated scheme like NetworkAccountTarget) and the next round is
+#! depth 1.
 #!
 #! Inputs:  []
 #! Outputs: [current_depth]
@@ -514,10 +521,16 @@ proc get_current_depth
         exec.active_note::write_attachment_to_memory
         # => [num_words]
 
-        drop
+        eq.PSWAP_ATTACHMENT_NUM_WORDS
+        assert.err=ERR_PSWAP_ATTACHMENT_WRONG_NUM_WORDS
         # => []
 
         loc_load.PARENT_ATTACHMENT_DEPTH_OFFSET
+        # => [parent_depth]
+        dup u32split drop
+        # => [hi, parent_depth]
+
+        assertz.err=ERR_PSWAP_ATTACHMENT_DEPTH_NOT_U32
         # => [parent_depth]
     else
         drop push.0

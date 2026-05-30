@@ -187,7 +187,9 @@ where
         }
         // Ensure standard notes are ordered first.
         notes.sort_unstable_by_key(|note| {
-            StandardNote::from_script_root(note.script().root()).is_none()
+            // A script-load failure for PSWAP signals a corrupted build; treat the note as
+            // non-standard for ordering purposes and let downstream execution surface the error.
+            !matches!(StandardNote::from_script_root(note.script().root()), Ok(Some(_)))
         });
 
         let notes = InputNotes::from(notes);
@@ -219,8 +221,10 @@ where
         note: InputNote,
         tx_args: TransactionArgs,
     ) -> Result<NoteConsumptionStatus, NoteCheckerError> {
-        // Return the consumption status if we manage to determine it from the standard note
-        if let Some(standard_note) = StandardNote::from_script_root(note.note().script().root())
+        // Return the consumption status if we manage to determine it from the standard note.
+        // A script-load failure (build-time invariant) is treated as "not a known standard
+        // note" for this resolution path; downstream execution surfaces the underlying issue.
+        if let Ok(Some(standard_note)) = StandardNote::from_script_root(note.note().script().root())
             && let Some(consumption_status) =
                 standard_note.is_consumable(note.note(), target_account_id, block_ref)
         {

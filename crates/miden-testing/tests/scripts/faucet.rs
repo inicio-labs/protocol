@@ -1605,7 +1605,7 @@ async fn test_mint_note_output_note_types(#[case] note_type: NoteType) -> anyhow
         },
         NoteType::Public => {
             let output_note_tag = NoteTag::with_account_target(target_account.id());
-            let p2id_script = StandardNote::P2ID.script();
+            let p2id_script = StandardNote::P2ID.script()?;
             let p2id_storage =
                 vec![target_account.id().suffix(), target_account.id().prefix().as_felt()];
             let note_storage = NoteStorage::new(p2id_storage)?;

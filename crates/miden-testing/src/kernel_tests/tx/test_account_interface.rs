@@ -782,7 +782,7 @@ fn create_p2ide_note_with_storage(
     sender: AccountId,
 ) -> Note {
     let serial_num = RandomCoin::new(Default::default()).draw_word();
-    let note_script = StandardNote::P2IDE.script();
+    let note_script = StandardNote::P2IDE.script().unwrap();
     let recipient = NoteRecipient::new(
         serial_num,
         note_script,
