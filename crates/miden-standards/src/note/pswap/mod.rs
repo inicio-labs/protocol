@@ -699,8 +699,7 @@ impl TryFrom<PswapNote> for Note {
         // `const _: () = assert!` above proves to be within `MAX_NUM_ASSETS`. The
         // duplicate-detection loop starts at index 1 (`.skip(1)`), so it never executes for
         // a single-element vec. Both failure paths are unreachable here.
-        let assets =
-            NoteAssets::new(vec![pswap.offered_asset.into()]).unwrap_or_else(|_| unreachable!());
+        let assets = NoteAssets::new(vec![pswap.offered_asset.into()]).unwrap();
 
         let metadata = PartialNoteMetadata::new(pswap.sender, pswap.note_type).with_tag(tag);
 
