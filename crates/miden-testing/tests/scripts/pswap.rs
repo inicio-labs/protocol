@@ -65,7 +65,7 @@ fn build_pswap_note(
         .note_type(note_type)
         .offered_asset(offered_asset)
         .build()?;
-    let note: Note = pswap.clone().into();
+    let note: Note = pswap.clone().try_into()?;
     builder.add_output_note(RawOutputNote::Full(note.clone()));
     Ok((pswap, note))
 }
@@ -169,7 +169,7 @@ async fn pswap_note_alice_reconstructs_and_consumes_p2id(
         .note_type(NoteType::Public)
         .offered_asset(offered_asset)
         .build()?;
-    let pswap_note: Note = pswap.clone().into();
+    let pswap_note: Note = pswap.clone().try_into()?;
     builder.add_output_note(RawOutputNote::Full(pswap_note.clone()));
 
     let mut mock_chain = builder.build()?;
@@ -188,7 +188,7 @@ async fn pswap_note_alice_reconstructs_and_consumes_p2id(
     let mut expected_output_notes = vec![RawOutputNote::Full(p2id_note.clone())];
     let predicted_remainder = if is_partial {
         let r = remainder_pswap.expect("partial fill should produce remainder");
-        let rn = Note::from(r);
+        let rn = Note::try_from(r)?;
         expected_output_notes.push(RawOutputNote::Full(rn.clone()));
         Some(rn)
     } else {
@@ -354,7 +354,7 @@ async fn pswap_attachment_layout_matches_masm_test() -> anyhow::Result<()> {
 
     let (p2id_note, remainder_pswap) = pswap.execute(bob.id(), Some(eth_20.amount()), None)?;
     let remainder_note =
-        Note::from(remainder_pswap.expect("partial fill should produce remainder"));
+        Note::try_from(remainder_pswap.expect("partial fill should produce remainder"))?;
 
     let tx_context = mock_chain
         .build_tx_context(bob.id(), &[pswap_note.id()], &[])?
@@ -522,7 +522,7 @@ async fn pswap_fill_test(
 
     let mut expected_notes = vec![RawOutputNote::Full(p2id_note.clone())];
     if let Some(remainder) = remainder_pswap {
-        expected_notes.push(RawOutputNote::Full(Note::from(remainder)));
+        expected_notes.push(RawOutputNote::Full(Note::try_from(remainder)?));
     }
 
     let mut tx_builder = mock_chain
@@ -962,7 +962,7 @@ async fn pswap_assert_attachment_wrong_num_words() -> anyhow::Result<()> {
         .offered_asset(FungibleAsset::new(usdc_faucet.id(), 50)?)
         .attachment(bogus_attachment)
         .build()?;
-    let pswap_note: Note = pswap.clone().into();
+    let pswap_note: Note = pswap.clone().try_into()?;
     builder.add_output_note(RawOutputNote::Full(pswap_note.clone()));
 
     let mock_chain = builder.build()?;
@@ -1018,7 +1018,7 @@ async fn pswap_assert_attachment_depth_not_u32() -> anyhow::Result<()> {
         .offered_asset(FungibleAsset::new(usdc_faucet.id(), 50)?)
         .attachment(bogus_attachment)
         .build()?;
-    let pswap_note: Note = pswap.clone().into();
+    let pswap_note: Note = pswap.clone().try_into()?;
     builder.add_output_note(RawOutputNote::Full(pswap_note.clone()));
 
     let mock_chain = builder.build()?;
@@ -1189,7 +1189,7 @@ async fn pswap_multiple_partial_fills_test(#[case] fill_amount: u64) -> anyhow::
 
     let mut expected_notes = vec![RawOutputNote::Full(p2id_note)];
     if let Some(remainder) = remainder_pswap {
-        expected_notes.push(RawOutputNote::Full(Note::from(remainder)));
+        expected_notes.push(RawOutputNote::Full(Note::try_from(remainder)?));
     }
 
     let tx_context = mock_chain
@@ -1267,7 +1267,8 @@ async fn run_partial_fill_ratio_case(
 
     let mut expected_notes = vec![RawOutputNote::Full(p2id_note)];
     if remaining_requested > 0 {
-        let remainder = Note::from(remainder_pswap.expect("partial fill should produce remainder"));
+        let remainder =
+            Note::try_from(remainder_pswap.expect("partial fill should produce remainder"))?;
         expected_notes.push(RawOutputNote::Full(remainder));
     }
 
@@ -1431,7 +1432,7 @@ async fn pswap_chained_partial_fills_test(
             .note_type(NoteType::Public)
             .offered_asset(offered_fungible)
             .build()?;
-        let pswap_note: Note = pswap.clone().into();
+        let pswap_note: Note = pswap.clone().try_into()?;
 
         builder.add_output_note(RawOutputNote::Full(pswap_note.clone()));
         let mock_chain = builder.build()?;
@@ -1451,7 +1452,7 @@ async fn pswap_chained_partial_fills_test(
         let mut expected_notes = vec![RawOutputNote::Full(p2id_note)];
         if remaining_requested > 0 {
             let remainder =
-                Note::from(remainder_pswap.expect("partial fill should produce remainder"));
+                Note::try_from(remainder_pswap.expect("partial fill should produce remainder"))?;
             expected_notes.push(RawOutputNote::Full(remainder));
         }
 
@@ -1540,7 +1541,8 @@ fn compare_pswap_create_output_notes_vs_test_helper() {
         .offered_asset(FungibleAsset::new(usdc_faucet.id(), 50).unwrap())
         .build()
         .unwrap()
-        .into();
+        .try_into()
+        .unwrap();
 
     // Roundtrip: try_from -> execute -> verify outputs
     let pswap = PswapNote::try_from(&pswap_note).unwrap();
@@ -1717,7 +1719,7 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
         .note_type(NoteType::Public)
         .offered_asset(FungibleAsset::new(usdc_faucet.id(), initial_offered)?)
         .build()?;
-    let original_pswap_note: Note = original_pswap.clone().into();
+    let original_pswap_note: Note = original_pswap.clone().try_into()?;
     builder.add_output_note(RawOutputNote::Full(original_pswap_note.clone()));
 
     let mut mock_chain = builder.build()?;
@@ -1747,7 +1749,7 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
         let next_pswap_opt = if remaining_requested > 0 {
             let predicted_remainder =
                 predicted_remainder_pswap.expect("partial fill should produce remainder");
-            expected_notes.push(RawOutputNote::Full(Note::from(predicted_remainder.clone())));
+            expected_notes.push(RawOutputNote::Full(Note::try_from(predicted_remainder.clone())?));
             Some(predicted_remainder)
         } else {
             None
@@ -1830,7 +1832,7 @@ async fn pswap_creator_reconstructs_lineage_from_attachments() -> anyhow::Result
 
         // Advance state for the next round.
         if let Some(next) = next_pswap_opt {
-            current_pswap_note = Note::from(next.clone());
+            current_pswap_note = Note::try_from(next.clone())?;
             current_pswap = next;
             current_offered = remaining_offered;
             current_requested = remaining_requested;
@@ -1899,8 +1901,8 @@ async fn pswap_disambiguates_multiple_creator_pswaps_in_same_tx() -> anyhow::Res
 
     assert_ne!(pswap_a.order_id(), pswap_b.order_id(), "test setup: order_ids must differ");
 
-    let note_a: Note = pswap_a.clone().into();
-    let note_b: Note = pswap_b.clone().into();
+    let note_a: Note = pswap_a.clone().try_into()?;
+    let note_b: Note = pswap_b.clone().try_into()?;
     builder.add_output_note(RawOutputNote::Full(note_a.clone()));
     builder.add_output_note(RawOutputNote::Full(note_b.clone()));
     let mock_chain = builder.build()?;
@@ -1921,8 +1923,8 @@ async fn pswap_disambiguates_multiple_creator_pswaps_in_same_tx() -> anyhow::Res
         pswap_a.execute(bob.id(), Some(AssetAmount::new(fill_each)?), None)?;
     let (payback_b, remainder_b) =
         pswap_b.execute(bob.id(), Some(AssetAmount::new(fill_each)?), None)?;
-    let remainder_a_note = Note::from(remainder_a.expect("partial fill A produces remainder"));
-    let remainder_b_note = Note::from(remainder_b.expect("partial fill B produces remainder"));
+    let remainder_a_note = Note::try_from(remainder_a.expect("partial fill A produces remainder"))?;
+    let remainder_b_note = Note::try_from(remainder_b.expect("partial fill B produces remainder"))?;
 
     let tx_context = mock_chain
         .build_tx_context(bob.id(), &[note_a.id(), note_b.id()], &[])?

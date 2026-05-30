@@ -1,3 +1,4 @@
+use alloc::string::{String, ToString};
 use alloc::vec;
 use core::num::NonZeroU32;
 
@@ -38,13 +39,20 @@ pub use storage::PswapNoteStorage;
 /// Path to the PSWAP note script procedure in the standards library.
 const PSWAP_SCRIPT_PATH: &str = "::miden::standards::notes::pswap::main";
 
-// Initialize the PSWAP note script only once
-static PSWAP_SCRIPT: LazyLock<NoteScript> = LazyLock::new(|| {
+// Cached load result for the PSWAP note script. The error path is reachable only if the
+// standards library is built without the PSWAP procedure (a build-time invariant); we still
+// surface it as a `Result` rather than panicking so callers control the failure mode.
+// `NoteError` is not `Clone`, so the error side is stored as `String` and re-wrapped on each
+// access.
+static PSWAP_SCRIPT: LazyLock<Result<NoteScript, String>> = LazyLock::new(|| {
     let standards_lib = StandardsLib::default();
     let path = Path::new(PSWAP_SCRIPT_PATH);
-    NoteScript::from_library_reference(standards_lib.as_ref(), path)
-        .expect("Standards library contains PSWAP note script procedure")
+    NoteScript::from_library_reference(standards_lib.as_ref(), path).map_err(|e| e.to_string())
 });
+
+fn pswap_script_error(msg: &str) -> NoteError {
+    NoteError::other(alloc::format!("failed to load PSWAP note script: {msg}"))
+}
 
 // ORDER ID
 // ================================================================================================
@@ -152,13 +160,25 @@ impl PswapNote {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the compiled PSWAP note script.
-    pub fn script() -> NoteScript {
-        PSWAP_SCRIPT.clone()
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the standards library is built without the PSWAP procedure (a
+    /// build-time invariant; this should not happen in a valid build).
+    pub fn script() -> Result<NoteScript, NoteError> {
+        PSWAP_SCRIPT
+            .as_ref()
+            .map(NoteScript::clone)
+            .map_err(|msg| pswap_script_error(msg))
     }
 
     /// Returns the root hash of the PSWAP note script.
-    pub fn script_root() -> NoteScriptRoot {
-        PSWAP_SCRIPT.root()
+    ///
+    /// # Errors
+    ///
+    /// Same condition as [`Self::script`].
+    pub fn script_root() -> Result<NoteScriptRoot, NoteError> {
+        PSWAP_SCRIPT.as_ref().map(|s| s.root()).map_err(|msg| pswap_script_error(msg))
     }
 
     /// Builds the `NOTE_ARGS` word that the PSWAP script expects when a consumer wants to fill
@@ -487,11 +507,11 @@ impl PswapNote {
             .creator_account_id(self.storage.creator_account_id())
             .payback_note_type(self.storage.payback_note_type())
             .build();
-        let recipient = new_storage.into_recipient(remainder_serial);
+        let recipient = new_storage.into_recipient(remainder_serial)?;
 
         let assets = NoteAssets::new(vec![offered_asset.into()])?;
 
-        let tag = Self::create_tag(self.note_type, &offered_asset, &requested_asset);
+        let tag = Self::create_tag(self.note_type, &offered_asset, &requested_asset)?;
         let metadata = PartialNoteMetadata::new(consumer_account_id, self.note_type).with_tag(tag);
 
         Ok(Note::with_attachments(
@@ -517,8 +537,9 @@ impl PswapNote {
         note_type: NoteType,
         offered_asset: &FungibleAsset,
         requested_asset: &FungibleAsset,
-    ) -> NoteTag {
-        let pswap_root_bytes = Self::script().root().as_bytes();
+    ) -> Result<NoteTag, NoteError> {
+        let script_root = Self::script_root()?;
+        let pswap_root_bytes = script_root.as_bytes();
 
         // Construct the pswap use case ID from the 14 most significant bits of the script root.
         // This leaves the two most significant bits zero.
@@ -538,7 +559,7 @@ impl PswapNote {
             | ((pswap_use_case_id as u32) << 16)
             | asset_pair as u32;
 
-        NoteTag::new(tag)
+        Ok(NoteTag::new(tag))
     }
 
     /// Computes `floor((offered_total * fill_amount) / requested_total)` via a
@@ -657,15 +678,21 @@ impl PswapNote {
 const _: () = assert!(1 <= NoteAssets::MAX_NUM_ASSETS);
 
 /// Converts a [`PswapNote`] into a protocol [`Note`], computing the final PSWAP tag.
-impl From<PswapNote> for Note {
-    fn from(pswap: PswapNote) -> Self {
+///
+/// # Errors
+///
+/// Propagates the script-load error from [`PswapNote::script`] (build-time invariant).
+impl TryFrom<PswapNote> for Note {
+    type Error = NoteError;
+
+    fn try_from(pswap: PswapNote) -> Result<Self, Self::Error> {
         let tag = PswapNote::create_tag(
             pswap.note_type,
             &pswap.offered_asset,
             pswap.storage.requested_asset(),
-        );
+        )?;
 
-        let recipient = pswap.storage.into_recipient(pswap.serial_number);
+        let recipient = pswap.storage.into_recipient(pswap.serial_number)?;
 
         // Unreachable per the `const _: () = assert!` above (single-element vec, so the
         // duplicate-detection loop never iterates).
@@ -676,7 +703,7 @@ impl From<PswapNote> for Note {
 
         let attachments = pswap.attachment.map(NoteAttachments::from).unwrap_or_default();
 
-        Note::with_attachments(assets, metadata, recipient, attachments)
+        Ok(Note::with_attachments(assets, metadata, recipient, attachments))
     }
 }
 
@@ -685,7 +712,7 @@ impl TryFrom<&Note> for PswapNote {
     type Error = NoteError;
 
     fn try_from(note: &Note) -> Result<Self, Self::Error> {
-        if note.recipient().script().root() != PswapNote::script_root() {
+        if note.recipient().script().root() != PswapNote::script_root()? {
             return Err(NoteError::other("note script root does not match PSWAP script root"));
         }
 

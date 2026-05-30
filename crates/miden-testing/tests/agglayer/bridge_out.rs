@@ -214,7 +214,7 @@ async fn bridge_out_consecutive() -> anyhow::Result<()> {
         );
         assert_eq!(
             burn_note.recipient().script().root(),
-            StandardNote::BURN.script_root(),
+            StandardNote::BURN.script_root()?,
             "BURN note should use the BURN script"
         );
 

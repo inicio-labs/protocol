@@ -40,7 +40,7 @@ fn build_pswap_note(
         .offered_asset(offered_asset)
         .build()
         .unwrap();
-    let note: Note = pswap.clone().into();
+    let note: Note = pswap.clone().try_into().unwrap();
     (pswap, note)
 }
 
@@ -58,7 +58,7 @@ fn pswap_note_creation_and_script() {
     assert_eq!(pswap.sender(), creator_id);
     assert_eq!(pswap.note_type(), NoteType::Public);
 
-    let script = PswapNote::script();
+    let script = PswapNote::script().unwrap();
     assert!(Word::from(script.root()) != Word::default(), "Script root should not be zero");
     assert_eq!(note.metadata().sender(), creator_id);
     assert_eq!(note.metadata().note_type(), NoteType::Public);
@@ -110,7 +110,7 @@ fn pswap_tag() {
     )
     .unwrap();
 
-    let tag = PswapNote::create_tag(NoteType::Public, &offered_asset, &requested_asset);
+    let tag = PswapNote::create_tag(NoteType::Public, &offered_asset, &requested_asset).unwrap();
     let tag_u32 = u32::from(tag);
 
     // Verify note_type bits (top 2 bits should be 10 for Public)

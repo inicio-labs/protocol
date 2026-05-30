@@ -51,8 +51,12 @@ impl PswapNoteStorage {
     pub const NUM_STORAGE_ITEMS: usize = 7;
 
     /// Consumes the storage and returns a PSWAP [`NoteRecipient`] with the provided serial number.
-    pub fn into_recipient(self, serial_num: Word) -> NoteRecipient {
-        NoteRecipient::new(serial_num, PswapNote::script(), NoteStorage::from(self))
+    ///
+    /// # Errors
+    ///
+    /// Propagates the error from [`PswapNote::script`] (build-time invariant).
+    pub fn into_recipient(self, serial_num: Word) -> Result<NoteRecipient, NoteError> {
+        Ok(NoteRecipient::new(serial_num, PswapNote::script()?, NoteStorage::from(self)))
     }
 
     // PUBLIC ACCESSORS
