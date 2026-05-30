@@ -120,7 +120,10 @@ impl From<PswapNoteStorage> for NoteStorage {
             storage.creator_account_id.prefix().as_felt(),
             storage.creator_account_id.suffix(),
         ];
-        // Unreachable per the `const _: () = assert!` above.
+        // SAFETY: `NoteStorage::new` only fails when its input exceeds
+        // `MAX_NOTE_STORAGE_ITEMS`. We always pass exactly `NUM_STORAGE_ITEMS = 7` items, and
+        // the `const _: () = assert!` above proves at compile time that
+        // `NUM_STORAGE_ITEMS <= MAX_NOTE_STORAGE_ITEMS`, so this branch is unreachable.
         NoteStorage::new(storage_items).unwrap_or_else(|_| unreachable!())
     }
 }

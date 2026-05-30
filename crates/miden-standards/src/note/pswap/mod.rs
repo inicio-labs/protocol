@@ -694,8 +694,11 @@ impl TryFrom<PswapNote> for Note {
 
         let recipient = pswap.storage.into_recipient(pswap.serial_number)?;
 
-        // Unreachable per the `const _: () = assert!` above (single-element vec, so the
-        // duplicate-detection loop never iterates).
+        // SAFETY: `NoteAssets::new` fails on (a) more than `MAX_NUM_ASSETS` assets, or (b) a
+        // duplicate asset in the list. We always pass exactly one asset, which the
+        // `const _: () = assert!` above proves to be within `MAX_NUM_ASSETS`. The
+        // duplicate-detection loop starts at index 1 (`.skip(1)`), so it never executes for
+        // a single-element vec. Both failure paths are unreachable here.
         let assets =
             NoteAssets::new(vec![pswap.offered_asset.into()]).unwrap_or_else(|_| unreachable!());
 
