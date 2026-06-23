@@ -482,7 +482,6 @@ async fn user_code_can_abort_transaction_with_summary() -> anyhow::Result<()> {
         .context("failed to build account")?;
 
     // Consume and create a note so the input and outputs notes commitment is not the empty word.
-    // Use P2ANY: a P2ID note must carry at least one asset.
     let mut rng = RandomCoin::new(Word::empty());
     let output_note = create_p2any_note(account.id(), NoteType::Private, [], &mut rng);
     let input_note = create_spawn_note(vec![&output_note])?;
@@ -522,7 +521,6 @@ async fn tx_summary_commitment_is_signed_by_falcon_auth() -> anyhow::Result<()> 
         auth_scheme: AuthScheme::Falcon512Poseidon2,
     })?;
     let mut rng = RandomCoin::new(Word::empty());
-    // Use P2ANY: a P2ID note must carry at least one asset.
     let p2any_note = create_p2any_note(account.id(), NoteType::Private, [], &mut rng);
     let spawn_note = builder.add_spawn_note([&p2any_note])?;
     let chain = builder.build()?;
@@ -573,7 +571,6 @@ async fn tx_summary_commitment_is_signed_by_ecdsa_auth() -> anyhow::Result<()> {
     let account = builder
         .add_existing_mock_account(Auth::BasicAuth { auth_scheme: AuthScheme::EcdsaK256Keccak })?;
     let mut rng = RandomCoin::new(Word::empty());
-    // Use P2ANY: a P2ID note must carry at least one asset.
     let p2any_note = create_p2any_note(account.id(), NoteType::Private, [], &mut rng);
     let spawn_note = builder.add_spawn_note([&p2any_note])?;
     let chain = builder.build()?;
