@@ -720,15 +720,15 @@ impl MockChainBuilder {
         requested_asset: Asset,
         payback_note_type: NoteType,
     ) -> anyhow::Result<(Note, NoteDetails)> {
-        let (swap_note, payback_note) = SwapNote::create(
-            sender,
-            offered_asset,
-            requested_asset,
-            NoteType::Public,
-            NoteAttachments::default(),
-            payback_note_type,
-            &mut self.rng,
-        )?;
+        let (swap_note, payback_note) = SwapNote::builder()
+            .sender(sender)
+            .offered_asset(offered_asset)
+            .requested_asset(requested_asset)
+            .swap_note_type(NoteType::Public)
+            .payback_note_type(payback_note_type)
+            .generate_serial_numbers(&mut self.rng)
+            .build()?
+            .into_notes();
 
         self.add_output_note(RawOutputNote::Full(swap_note.clone()));
 
