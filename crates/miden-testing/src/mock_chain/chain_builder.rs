@@ -728,7 +728,7 @@ impl MockChainBuilder {
             .payback_note_type(payback_note_type)
             .generate_serial_numbers(&mut self.rng)
             .build()?
-            .into_notes();
+            .into_notes()?;
 
         self.add_output_note(RawOutputNote::Full(swap_note.clone()));
 

@@ -164,7 +164,11 @@ impl SwapNote {
 
     /// Consumes the note and returns the outgoing SWAP [`Note`] together with the [`NoteDetails`]
     /// of the payback P2ID note that the consumer will create for the sender.
-    pub fn into_notes(self) -> (Note, NoteDetails) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if constructing the note's assets fails (see [`NoteAssets::new`]).
+    pub fn into_notes(self) -> Result<(Note, NoteDetails), NoteError> {
         let swap_storage = SwapNoteStorage::new(
             self.sender,
             self.requested_asset,
@@ -175,17 +179,15 @@ impl SwapNote {
 
         let tag = Self::build_tag(self.swap_note_type, &self.offered_asset, &self.requested_asset);
         let metadata = PartialNoteMetadata::new(self.sender, self.swap_note_type).with_tag(tag);
-        let assets = NoteAssets::new(vec![self.offered_asset])
-            .expect("a single offered asset never exceeds the note asset limit");
+        let assets = NoteAssets::new(vec![self.offered_asset])?;
         let note = Note::with_attachments(assets, metadata, recipient, self.attachments);
 
         let payback_recipient =
             P2idNoteStorage::new(self.sender).into_recipient(self.payback_serial_number);
-        let payback_assets = NoteAssets::new(vec![self.requested_asset])
-            .expect("a single requested asset never exceeds the note asset limit");
+        let payback_assets = NoteAssets::new(vec![self.requested_asset])?;
         let payback_note = NoteDetails::new(payback_assets, payback_recipient);
 
-        (note, payback_note)
+        Ok((note, payback_note))
     }
 
     /// Returns a note tag for a swap note with the specified parameters.
@@ -506,6 +508,8 @@ mod tests {
 
     #[test]
     fn builder_produces_swap_and_payback_notes() {
+        // The builder produces a SWAP note whose accessors echo the inputs, and `into_notes`
+        // splits it into the public SWAP note and its payback note, each carrying one asset.
         let sender = AccountId::dummy([7u8; 15], AccountIdVersion::Version1, AccountType::Private);
         let offered_asset = fungible_asset();
         let requested_asset = non_fungible_asset();
@@ -525,7 +529,7 @@ mod tests {
         assert_eq!(swap.offered_asset(), offered_asset);
         assert_eq!(swap.requested_asset(), requested_asset);
 
-        let (note, payback_note) = swap.into_notes();
+        let (note, payback_note) = swap.into_notes().unwrap();
         assert_eq!(note.metadata().note_type(), NoteType::Public);
         assert_eq!(note.assets().num_assets(), 1);
         assert_eq!(payback_note.assets().num_assets(), 1);
