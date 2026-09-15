@@ -418,11 +418,12 @@ async fn test_multisig_rejects_invalid_eip712_witness(
             result,
             MasmError::from_static_str("invalid public key commitment")
         ),
+        // RawAdviceKey places the witness under the raw key, so the raw verifier rejects it.
         InvalidEip712Witness::RawSignature
         | InvalidEip712Witness::RawAdviceKey
-        | InvalidEip712Witness::WrongTransactionSummary => assert!(
-            result.is_err(),
-            "a signature must not verify for a different message format or transaction summary"
+        | InvalidEip712Witness::WrongTransactionSummary => assert_transaction_executor_error!(
+            result,
+            MasmError::from_static_str("ECDSA verification failed: x(VERIFY_POINT) != SIG_R")
         ),
     }
 
@@ -514,6 +515,17 @@ async fn test_multisig_does_not_double_count_raw_and_eip712_signatures() -> anyh
         .await?;
     let (eip712_key, eip712_witness) =
         eip712_signature_witness(&secret_keys[0], &public_keys[0], tx_summary_hash)?;
+    let (approver_1_eip712_key, approver_1_eip712_witness) =
+        eip712_signature_witness(&secret_keys[1], &public_keys[1], tx_summary_hash)?;
+
+    // Control: the same EIP-712 witness counts when approver 0 provides no raw signature.
+    mock_tx_builder
+        .clone()
+        .add_advice_map_entry(eip712_key, eip712_witness.clone())
+        .add_advice_map_entry(approver_1_eip712_key, approver_1_eip712_witness)
+        .build()?
+        .execute()
+        .await?;
 
     let result = mock_tx_builder
         .add_signature(public_keys[0].to_commitment(), tx_summary_hash, raw_signature)
@@ -523,6 +535,52 @@ async fn test_multisig_does_not_double_count_raw_and_eip712_signatures() -> anyh
         .await;
 
     assert!(matches!(result, Err(TransactionExecutorError::Unauthorized(_))));
+    Ok(())
+}
+
+/// A raw signature takes precedence over an EIP-712 entry for the same approver, so the entry is
+/// never checked and a malformed one does not abort the transaction.
+#[rstest]
+#[case::ecdsa_approver_with_short_eip712_entry(AuthScheme::EcdsaK256Keccak, 31)]
+#[case::falcon_approver_with_eip712_entry(AuthScheme::Falcon512Poseidon2, 32)]
+#[tokio::test]
+async fn test_multisig_raw_signature_takes_precedence_over_eip712_entry(
+    #[case] auth_scheme: AuthScheme,
+    #[case] eip712_entry_length: usize,
+) -> anyhow::Result<()> {
+    let (_, auth_schemes, public_keys, authenticators) =
+        setup_keys_and_authenticators_with_scheme(1, 1, auth_scheme)?;
+    let approvers = vec![(public_keys[0].clone(), auth_schemes[0])];
+    let multisig_account = create_multisig_account(1, &approvers, 10, vec![])?;
+
+    let mock_chain = MockChainBuilder::with_accounts([multisig_account.clone()])?.build()?;
+    let mock_tx_builder = mock_chain
+        .build_transaction(multisig_account.id())
+        .auth_args(Word::from([Felt::new_unchecked(12); 4]));
+    let tx_summary = mock_tx_builder
+        .clone()
+        .build()?
+        .execute()
+        .await
+        .unwrap_err()
+        .unwrap_unauthorized_err();
+    let tx_summary_hash = tx_summary.as_ref().to_commitment();
+    let raw_signature = authenticators[0]
+        .get_signature(
+            public_keys[0].to_commitment(),
+            &SigningInputs::TransactionSummary(tx_summary),
+        )
+        .await?;
+    let eip712_key =
+        eip712::transaction_summary_signature_key(public_keys[0].to_commitment(), tx_summary_hash);
+
+    mock_tx_builder
+        .add_signature(public_keys[0].to_commitment(), tx_summary_hash, raw_signature)
+        .add_advice_map_entry(eip712_key, vec![Felt::ZERO; eip712_entry_length])
+        .build()?
+        .execute()
+        .await?;
+
     Ok(())
 }
 
